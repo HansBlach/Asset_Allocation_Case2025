@@ -1,4 +1,2 @@
-change = 1
-if change == 1:
-    change = 2
+change = 5
 print(change)

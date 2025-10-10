@@ -6,16 +6,18 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 # Load the data from CSV files
-df_EU = pd.read_csv("EXPORT EU EUR.csv")
-df_USEUR = pd.read_csv("EXPORT US EUR.csv")
-df_US = pd.read_csv("EXPORT US USD.csv")
+df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
+df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
+df_long_EU = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
+df_long_USEUR = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
+df_long_US = pd.read_csv("csv_files/long_EXPORT US USD.csv")
 
 # Define the target and explanatory variables
 explanatory_cols = ["RM_RF", "SMB", "MOM"]
 
-
-# Fra chat: Coerce to numeric where possible and drop impossible rows per portfolio ---
 def run_regression(df, explanatory_cols):
+    # Fra chat: Coerce to numeric where possible and drop impossible rows per portfolio ---
     # Do for all portfolios in sorted data set
     portfolio_cols = list(df.columns[5:36])
     # (Factor columns must exist)
@@ -101,12 +103,24 @@ results_df_USEUR = run_regression(df_USEUR, explanatory_cols)
 # Run regression for US USD
 results_df_US = run_regression(df_US, explanatory_cols)
 
+# Run regression for EU EUR
+results_df_long_EU = run_regression(df_long_EU, explanatory_cols)
+
+# Run regression for US EUR
+results_df_long_USEUR = run_regression(df_long_USEUR, explanatory_cols)
+
+# Run regression for US USD
+results_df_long_US = run_regression(df_long_US, explanatory_cols)
+
 
 
 ###################################
 # Print data i nyt format:
 # 1:
-results_df_EU.to_csv("results_df_EU.csv")        # metrics per portfolio
-results_df_USEUR.to_csv("results_df_USEUR.csv")
-results_df_US.to_csv("results_df_US.csv")
+results_df_EU.to_csv("csv_files/results_df_EU.csv")        # metrics per portfolio
+results_df_USEUR.to_csv("csv_files/results_df_USEUR.csv")
+results_df_US.to_csv("csv_files/results_df_US.csv")
+results_df_long_EU.to_csv("csv_files/results_df_long_EU.csv")
+results_df_long_USEUR.to_csv("csv_files/results_df_long_USEUR.csv")
+results_df_long_US.to_csv("csv_files/results_df_long_US.csv")
 

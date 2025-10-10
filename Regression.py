@@ -6,9 +6,9 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 # Load the data from CSV files
-df_EU = pd.read_csv("EXPORT EU EUR.csv")
-df_USEUR = pd.read_csv("EXPORT US EUR.csv")
-df_US = pd.read_csv("EXPORT US USD.csv")
+df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
+df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
 
 # Define the target and explanatory variables
 explanatory_cols = ["RM_RF", "SMB", "MOM"]

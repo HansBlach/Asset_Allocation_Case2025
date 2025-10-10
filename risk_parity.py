@@ -5,9 +5,9 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 # Load the data from CSV files
-df_EU = pd.read_csv("EXPORT EU EUR.csv")
-df_USEUR = pd.read_csv("EXPORT US EUR.csv")
-df_US = pd.read_csv("EXPORT US USD.csv")
+df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
+df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
 def return_variance(returns: np.ndarray) -> float:
     """Calculate variance of a vector of returns."""
     return np.var(returns, ddof=1)  # sample variance (ddof=1)
@@ -38,23 +38,15 @@ def risk_parity_weights(variances_matrix: np.ndarray) -> np.ndarray:
     return weights
 
 def apply_weights_to_next_month_returns(weights: np.ndarray, returns: np.ndarray, window: int) -> np.ndarray:
-    """
-    weights: shape (M, N) with M = T - window + 1
-    returns: original returns array shape (T, N)
-    window: the same window used to compute rolling_std
-    Returns: strategy_returns shape (M,) where each element is
-             the portfolio return in the month AFTER the window,
-             i.e. using returns[window + t] with weights[t, :].
-    """
-    # next-month returns start at index `window` and length M
-    next_month_returns = returns[window : window + weights.shape[0], :]  # shape (M, N)
-    # elementwise portfolio return: dot product per row
-    strat_returns = np.einsum('ij,ij->i', next_month_returns, weights)
+    # Make sure shapes match
+    M = min(weights.shape[0], len(returns) - window)
+    next_month_returns = returns[window : window + M, :]
+    strat_returns = np.einsum('ij,ij->i', next_month_returns, weights[:M, :])
     return strat_returns
 
 def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF,use_covariance = False):
 
-    date = csv['date'].to_numpy()
+    date = csv['Date'].to_numpy()
     RF = csv['RF'].to_numpy()
 
     variance_list = []   # ← start with an empty list

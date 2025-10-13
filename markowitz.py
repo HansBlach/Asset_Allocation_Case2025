@@ -6,19 +6,19 @@ import matplotlib.pyplot as plt
 
 # Read CSV files:
 
-EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+EU_data = pd.read_csv("csv_files/EXPORT EU EUR.csv")
 
-US = pd.read_csv("csv_files/EXPORT US EUR.csv")
+US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
 
 # Select columns with assets, and prefix EU/US to each asset.
 
-portfolios = list(EU.columns[5:36])
+portfolios = list(EU_data.columns[5:36])
 
-EU = EU[portfolios]
+EU = EU_data[portfolios]
 
 EU.columns = ["EU_" + p for p in portfolios]
 
-US = US[portfolios]
+US = US_data[portfolios]
 
 US.columns = ["US_" + p for p in portfolios]
 
@@ -48,13 +48,11 @@ def weights_sum_constr(weights):
 
 # Function that takes data and a target (either variance or mean depending on direction) and returns the scipy.optimize result object
 
-def markowitz(data, target, direction = "min"):
-    cov_matrix = data.cov().to_numpy()
-    mean_return = data.mean().to_numpy()
+def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min"):
 
     w0 = np.zeros(len(mean_return)) + 1/len(mean_return)
 
-    bound = [(0, 1)] * len(mean_return)
+    bound = [(0, 1)] * len(mean_return) # Ensures no shorting is allowed
 
     if direction == "min":
         cons = [{'type': 'eq', 'fun': weights_sum_constr},
@@ -73,36 +71,30 @@ def markowitz(data, target, direction = "min"):
     
     return res
 
-
-
 # function that finds the empirical minimum variance frontier:
 
-def efficient_frontier(data, n_points=150):
-
-    mean_return = data.mean().to_numpy()
-    cov_matrix = data.cov().to_numpy()
-
+def efficient_frontier(mean_return, cov_matrix, n_points=150):
     mu_min, mu_max = mean_return.min(), mean_return.max()
 
     target_returns = np.linspace(mu_min, mu_max, n_points)
 
     frontier_returns = []
-    frontier_risks = []
+    frontier_variance = []
     frontier_weights = []
 
     for mu in target_returns:
-        res = markowitz(data, mu, direction="min")
+        res = markowitz_optimizer(mean_return, cov_matrix, mu, direction="min")
         if res.success:
             w = res.x
             port_return = w @ mean_return
             port_var = w.T @ cov_matrix @ w
             frontier_returns.append(port_return)
-            frontier_risks.append(np.sqrt(port_var))
+            frontier_variance.append(np.sqrt(port_var))
             frontier_weights.append(w)
         else:
             print(f"Optimization failed for target return {mu:.4f}: {res.message}")
 
-    return np.array(frontier_risks), np.array(frontier_returns), np.array(frontier_weights)
+    return np.array(frontier_variance), np.array(frontier_returns), np.array(frontier_weights)
 
 # Function that plots the frontier:
 
@@ -117,6 +109,87 @@ def frontier_plotter(risks, returns):
     plt.show()
 
 
-risks, returns, weights = efficient_frontier(all_assets)
+# We want to invest in the portfolio with the highest sharpe ratio, that is the tangent portfolio
+# but we can't use theoretical results because we have a no-shorting constraint
+# Therefore we use the efficient frontier function to find (a portfolio close to) the tangent portfolio by taking the one with the highest sharpe ratio
 
-frontier_plotter(risks, returns)
+def markowitz_strategy(data, n_points = 50):
+    mean_return = data.mean().to_numpy()
+    cov_matrix = data.cov().to_numpy()
+
+    variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points)
+
+    sharpe = returns/variance
+
+    idx_tangent = np.argmax(sharpe)
+
+    return(weights[idx_tangent])
+
+# Test how many points are needed to get a "tight enough" grid
+
+# test_list = [5, 20, 50, 100]
+
+# for n in test_list:
+#     weights, sharpe, returns = markowitz_strategy(all_assets.tail(36), n_points = n)
+#     print(n, sharpe, returns)
+
+# risks, returns, weights = efficient_frontier(all_assets)
+
+# frontier_plotter(risks, returns)
+
+
+def rolling_dataframes(data, window_size):
+    return [data.iloc[i:i+window_size] for i in range(data.shape[0] - window_size + 1)]
+
+def markowitz_historical(data, window, n_points = 50):
+    rolling_data = rolling_dataframes(data, window)
+
+    N = data.shape[0]
+
+    actual_return = np.zeros(N - window)
+
+    for i in range(N - window):
+        weights = markowitz_strategy(rolling_data[i],n_points)
+        next_per_return = np.array(data.iloc[window + i, :])
+        actual_return[i] = weights.T @ next_per_return
+    
+    return actual_return
+
+print(markowitz_historical(EU, 36, n_points = 5))
+
+# Function to convert returns to value development
+
+def returns_to_value(returns, start_value=1.0):
+    value_data = np.zeros(returns.shape)
+    value_data[0] = start_value
+
+    for i in range(1, returns.shape[0]):
+        value_data[i] = value_data[i-1] * (1 + returns[i]/100)
+    
+    return value_data
+
+
+
+
+def markowitz_result_plot(data, window, n_points):
+    # plots the value development of the strategy
+
+    plt.figure(figsize=(10, 6))
+    for i in n_points:
+            result = markowitz_historical(data, window, i)
+            value_development = returns_to_value(result)
+            plt.plot(value_development, label=f'Markowitz Strategy, points = {i}')
+    plt.xlabel('Time (Months)')
+    plt.ylabel('Portfolio Value')
+    plt.title('Value Development of Markowitz Strategy')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
+    plt.show()
+
+
+# n_points = [10, 20, 50]
+
+# markowitz_result_plot(EU, 36, n_points)
+
+
+

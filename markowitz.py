@@ -26,24 +26,27 @@ US.columns = ["US_" + p for p in portfolios]
 
 all_assets = pd.concat([EU,US],axis = 1)
 
+# Define the objective and constraint functions for the minimization problem
+
 def markowitz_min_obj(weights, cov_matrix):
     return(weights.T@cov_matrix@weights)
 
 def markowitz_min_constraint(weights,mean_return,mu):
     return(weights.T@mean_return-mu)
 
+# Define objective and constraint functions fo the maximization problem (it can only minimize so we max -obj
+
 def markowitz_max_obj(weights, mean_return):
     return(-weights.T@mean_return)
 
-# if return >= 0 then variance less than sigma
 def markowitz_max_constraint(weights, cov_matrix, sigma):
     return(sigma - np.matmul(np.matmul(np.transpose(weights),cov_matrix),weights))
 
+# Define constraint that the weights sum to 1
 def weights_sum_constr(weights):
     return(sum(weights)-1)
 
-
-
+# Function that takes data and a target (either variance or mean depending on direction) and returns the scipy.optimize result object
 
 def markowitz(data, target, direction = "min"):
     cov_matrix = data.cov().to_numpy()
@@ -72,8 +75,7 @@ def markowitz(data, target, direction = "min"):
 
 
 
-
-# --- Efficient Frontier Calculation ---
+# function that finds the empirical minimum variance frontier:
 
 def efficient_frontier(data, n_points=150):
 
@@ -81,6 +83,7 @@ def efficient_frontier(data, n_points=150):
     cov_matrix = data.cov().to_numpy()
 
     mu_min, mu_max = mean_return.min(), mean_return.max()
+
     target_returns = np.linspace(mu_min, mu_max, n_points)
 
     frontier_returns = []
@@ -101,19 +104,19 @@ def efficient_frontier(data, n_points=150):
 
     return np.array(frontier_risks), np.array(frontier_returns), np.array(frontier_weights)
 
-test_data = all_assets.tail(240)
+# Function that plots the frontier:
 
-# --- Generate and plot the frontier ---
-risks, returns, weights = efficient_frontier(test_data)
-
-plt.figure(figsize=(10, 6))
-plt.plot(risks, returns, 'b-', lw=2, label='Efficient Frontier')
-plt.xlabel('Portfolio Risk (σ)')
-plt.ylabel('Expected Return (μ)')
-plt.title('Mean–Variance Efficient Frontier')
-plt.grid(True, linestyle='--', alpha=0.6)
-plt.legend()
-plt.show()
+def frontier_plotter(risks, returns):
+    plt.figure(figsize=(10, 6))
+    plt.plot(risks, returns, 'b-', lw=2, label='Efficient Frontier')
+    plt.xlabel('Portfolio Risk (σ)')
+    plt.ylabel('Expected Return (μ)')
+    plt.title('Mean–Variance Efficient Frontier')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
+    plt.show()
 
 
+risks, returns, weights = efficient_frontier(all_assets)
 
+frontier_plotter(risks, returns)

@@ -44,13 +44,13 @@ def apply_weights_to_next_month_returns(weights: np.ndarray, returns: np.ndarray
     strat_returns = np.einsum('ij,ij->i', next_month_returns, weights[:M, :])
     return strat_returns
 
-def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF,use_covariance = False):
+def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF):
 
     date = csv['Date'].to_numpy()
     RF = csv['RF'].to_numpy()
 
     variance_list = []   # ← start with an empty list
-    names_included = []  # optional, to track which ones you added
+    names_included = []  # track added factors
     return_list = []
 
     if has_MOM:
@@ -74,20 +74,48 @@ def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF,use_covariance = False):
         return_list.append(SMB)
         names_included.append("SMB")
 
-    # ... add others (RF, HML, etc.) similarly if relevant
-
-    # Finally, make the matrix
     if variance_list:
         sigma_matrix = np.column_stack(variance_list)
 
     
     if return_list:
         r_matrix = np.column_stack(return_list)
-    
     weights = risk_parity_weights(sigma_matrix)
-    return apply_weights_to_next_month_returns(weights, r_matrix, window)
+    # we can always print the weight and variance aswell
+    #region data_transport
+    asset_names = names_included
+    aligned_dates = date[window - 1:].astype(str)
+    view_weight = pd.DataFrame(weights, columns=asset_names)
+    view_weight.insert(0, "Date", aligned_dates)
 
-print(risk_parity(df_EU,36,True,True,True))
+    view_Var = pd.DataFrame(sigma_matrix, columns = asset_names)
+    view_Var.insert(0, "Date", aligned_dates)
+    view_return = pd.DataFrame(apply_weights_to_next_month_returns(weights, r_matrix, window), columns = ["return"])
+    aligned_dates_return = date[window :].astype(str)
+    view_return.insert(0,"Date", aligned_dates_return)
+
+    #endregion
+    #this will return a dataframe with dates and returns of the risk parity portfolio
+    return view_return
+
+EU_risk_parity = risk_parity(df_EU,36,True,True,True)
+# print("weights")
+# print(EU_weights, len(EU_weights))
+# print("variance")
+# print( EU_sigma_matrix, len(EU_sigma_matrix))
+#The length of the parity should be one shorter than the weights and variance, since it is the previous months weights and variance that is used for this months return
+# print("EU_risk_Parity_return")
+# print(EU_risk_parity, len(EU_risk_parity))
+# print(risk_parity(df_EU,36,True,True,True))
+# """
+# Small test to ckeck that the first and last return is as expected
+# """
+# var_a = np.array([2.50966659e+00,  4.95679603e+00, -3.16383356e+00])
+# var_b = np.array([0.40768592, 0.06749699, 0.52481709])
+# print("first return",sum(var_a*var_b), "actual return", EU_risk_parity["return"][0], "difference", sum(var_a*var_b) - EU_risk_parity["return"][0])
+# var_e = np.array([-5.14611285e-01, -5.12105144e+00,  1.12418060e+00])
+# var_f = np.array([0.23781546, 0.0105637,  0.75162085])
+# print("last return",sum(var_e*var_f), "actual return", EU_risk_parity["return"].iloc[-1], "difference", sum(var_e*var_f) - EU_risk_parity["return"].iloc[-1])
 
 
 

@@ -106,7 +106,6 @@ EU_risk_parity = risk_parity(df_EU,36,True,True,True)
 #The length of the parity should be one shorter than the weights and variance, since it is the previous months weights and variance that is used for this months return
 # print("EU_risk_Parity_return")
 # print(EU_risk_parity, len(EU_risk_parity))
-# print(risk_parity(df_EU,36,True,True,True))
 # """
 # Small test to ckeck that the first and last return is as expected
 # """

@@ -9,6 +9,7 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
 df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
 df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
+
 df_long_EU = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
 df_long_USEUR = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 df_long_US = pd.read_csv("csv_files/long_EXPORT US USD.csv")

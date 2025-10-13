@@ -99,6 +99,7 @@ def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF):
     return view_return
 
 EU_risk_parity = risk_parity(df_EU,36,True,True,True)
+
 # print("weights")
 # print(EU_weights, len(EU_weights))
 # print("variance")

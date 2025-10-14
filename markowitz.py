@@ -49,7 +49,9 @@ def weights_sum_constr(weights):
 # Function that takes data and a target (either variance or mean depending on direction) and returns the scipy.optimize result object
 
 def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min"):
-
+    # Add regularization to avoid singular covariance matrix
+    cov_matrix_reg = cov_matrix + np.eye(len(mean_return)) * 1e-6
+    
     w0 = np.zeros(len(mean_return)) + 1/len(mean_return)
 
     bound = [(0, 1)] * len(mean_return) # Ensures no shorting is allowed
@@ -58,11 +60,11 @@ def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min"):
         cons = [{'type': 'eq', 'fun': weights_sum_constr},
                 {'type': 'ineq', 'fun': markowitz_min_constraint, 'args': (mean_return, target)}]
         
-        res = minimize(markowitz_min_obj, w0, args = (cov_matrix,), constraints = cons, bounds = bound, method = "SLSQP")
+        res = minimize(markowitz_min_obj, w0, args = (cov_matrix_reg,), constraints = cons, bounds = bound, method = "SLSQP")
 
     if direction == "max":
         cons = [{'type': 'eq', 'fun': weights_sum_constr},
-                {'type': 'ineq', 'fun': markowitz_max_constraint, 'args': (cov_matrix, target)}]
+                {'type': 'ineq', 'fun': markowitz_max_constraint, 'args': (cov_matrix_reg, target)}]
         
         res = minimize(markowitz_max_obj, w0, args = (mean_return,), constraints = cons, bounds = bound, method = "SLSQP")
     
@@ -113,17 +115,33 @@ def frontier_plotter(risks, returns):
 # but we can't use theoretical results because we have a no-shorting constraint
 # Therefore we use the efficient frontier function to find (a portfolio close to) the tangent portfolio by taking the one with the highest sharpe ratio
 
-def markowitz_strategy(data, n_points = 50):
+def markowitz_strategy(data, mu_target = 0.5, n_points = 50, strategy = "tangent"):
     mean_return = data.mean().to_numpy()
     cov_matrix = data.cov().to_numpy()
 
-    variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points)
+    if strategy == "tangent":
+        variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points)
+        
+        # Check if we got valid results
+        if len(variance) == 0:
+            print("Warning: No valid frontier points found, using equal weights")
+            return np.ones(len(mean_return)) / len(mean_return)
 
-    sharpe = returns/variance
+        # Avoid division by zero
+        sharpe = np.divide(returns, variance, out=np.zeros_like(returns), where=variance!=0)
 
-    idx_tangent = np.argmax(sharpe)
+        idx_tangent = np.argmax(sharpe)
 
-    return(weights[idx_tangent])
+        return(weights[idx_tangent])
+    
+    if strategy == "fixed":
+        result = markowitz_optimizer(mean_return, cov_matrix, mu_target, direction = "min")
+        if result.success:
+            return(result.x)
+        else:
+            print("Warning: Fixed strategy optimization failed, using equal weights")
+            return np.ones(len(mean_return)) / len(mean_return)
+
 
 # Test how many points are needed to get a "tight enough" grid
 
@@ -141,7 +159,7 @@ def markowitz_strategy(data, n_points = 50):
 def rolling_dataframes(data, window_size):
     return [data.iloc[i:i+window_size] for i in range(data.shape[0] - window_size + 1)]
 
-def markowitz_historical(data, window, n_points = 50):
+def markowitz_historical(data, window, strategy = "tangent", mu_target = 0.05, n_points = 50):
     rolling_data = rolling_dataframes(data, window)
 
     N = data.shape[0]
@@ -149,13 +167,11 @@ def markowitz_historical(data, window, n_points = 50):
     actual_return = np.zeros(N - window)
 
     for i in range(N - window):
-        weights = markowitz_strategy(rolling_data[i],n_points)
+        weights = markowitz_strategy(rolling_data[i], mu_target, n_points, strategy = strategy)
         next_per_return = np.array(data.iloc[window + i, :])
         actual_return[i] = weights.T @ next_per_return
     
     return actual_return
-
-print(markowitz_historical(EU, 36, n_points = 5))
 
 # Function to convert returns to value development
 
@@ -176,7 +192,7 @@ def markowitz_result_plot(data, window, n_points):
 
     plt.figure(figsize=(10, 6))
     for i in n_points:
-            result = markowitz_historical(data, window, i)
+            result = markowitz_historical(data, window, n_points = i)
             value_development = returns_to_value(result)
             plt.plot(value_development, label=f'Markowitz Strategy, points = {i}')
     plt.xlabel('Time (Months)')

@@ -107,7 +107,7 @@ def risk_parity(csv1,csv2, market1, market2, include_market2, window,has_MOM1,ha
 
     #endregion
     #this will return a dataframe with dates and returns of the risk parity portfolio
-    return view_weight,view_return
+    return view_return
 
 EU_risk_parity = risk_parity(df_EU,df_USEUR,"EU","US",True,36,True,True,True,True,True,True)
 # print("weights")

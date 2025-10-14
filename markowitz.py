@@ -68,8 +68,8 @@ def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min"):
         
         res = minimize(markowitz_max_obj, w0, args = (mean_return,), constraints = cons, bounds = bound, method = "SLSQP")
     
-    if not res.success:
-        print("Optimization failed:", res.message)
+    # if not res.success:
+    #     print("Optimization failed:", res.message)
     
     return res
 
@@ -93,8 +93,8 @@ def efficient_frontier(mean_return, cov_matrix, n_points=150):
             frontier_returns.append(port_return)
             frontier_variance.append(np.sqrt(port_var))
             frontier_weights.append(w)
-        else:
-            print(f"Optimization failed for target return {mu:.4f}: {res.message}")
+        # else:
+        #     print(f"Optimization failed for target return {mu:.4f}: {res.message}")
 
     return np.array(frontier_variance), np.array(frontier_returns), np.array(frontier_weights)
 
@@ -109,7 +109,6 @@ def frontier_plotter(risks, returns):
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend()
     plt.show()
-
 
 # We want to invest in the portfolio with the highest sharpe ratio, that is the tangent portfolio
 # but we can't use theoretical results because we have a no-shorting constraint
@@ -139,7 +138,7 @@ def markowitz_strategy(data, mu_target = 0.5, n_points = 50, strategy = "tangent
         if result.success:
             return(result.x)
         else:
-            print("Warning: Fixed strategy optimization failed, using equal weights")
+            #print("Warning: Fixed strategy optimization failed, using equal weights")
             return np.ones(len(mean_return)) / len(mean_return)
 
 

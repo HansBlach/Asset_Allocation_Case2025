@@ -44,11 +44,7 @@ def apply_weights_to_next_month_returns(weights: np.ndarray, returns: np.ndarray
     strat_returns = np.einsum('ij,ij->i', next_month_returns, weights[:M, :])
     return strat_returns
 
-def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF):
-
-    date = csv['Date'].to_numpy()
-    RF = csv['RF'].to_numpy()
-
+def data_generator(csv,market,window, has_MOM, has_SMB, has_RM_RF):
     variance_list = []   # ← start with an empty list
     names_included = []  # track added factors
     return_list = []
@@ -58,28 +54,43 @@ def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF):
         sigma_MOM = rolling_variance(MOM, window)
         variance_list.append(sigma_MOM)
         return_list.append(MOM)
-        names_included.append("MOM")
+        names_included.append("MOM_" + market)
 
     if has_RM_RF:
         RM_RF = csv['RM_RF'].to_numpy()
         sigma_RM_RF = rolling_variance(RM_RF, window)
         variance_list.append(sigma_RM_RF)
         return_list.append(RM_RF)
-        names_included.append("RM_RF")
+        names_included.append("RM_RF_" + market)
 
     if has_SMB:
         SMB = csv['SMB'].to_numpy()
         sigma_SMB = rolling_variance(SMB, window)
         variance_list.append(sigma_SMB)
         return_list.append(SMB)
-        names_included.append("SMB")
-
-    if variance_list:
-        sigma_matrix = np.column_stack(variance_list)
-
+        names_included.append("SMB_" + market)
     
-    if return_list:
-        r_matrix = np.column_stack(return_list)
+    return return_list, variance_list, names_included
+
+
+def risk_parity(csv1,csv2, market1, market2, include_market2, window,has_MOM1,has_SMB1,has_RM_RF1, has_MOM2, has_SMB2, has_RM_RF2):
+    date = csv1['Date'].to_numpy()
+    date2 = csv1['Date'].to_numpy()
+
+    names_included = []  # track added factors
+    return_list = []
+    r_list1, v_list1, n_list1 = data_generator(csv1, market1, window, has_MOM1, has_SMB1,has_RM_RF1)
+    r_list2, v_list2, n_list2 = data_generator(csv2, market2, window, has_MOM2, has_SMB2,has_RM_RF2)
+    # Combine lists from both markets
+    if(include_market2):
+        sigma_matrix = np.column_stack(v_list1 + v_list2)
+        r_matrix = np.column_stack(r_list1 + r_list2)
+        names_included = n_list1 + n_list2
+    else:
+        sigma_matrix = np.column_stack(v_list1)
+        r_matrix = np.column_stack(r_list1)
+        names_included = n_list1
+    
     weights = risk_parity_weights(sigma_matrix)
     # we can always print the weight and variance aswell
     #region data_transport
@@ -96,16 +107,16 @@ def risk_parity(csv, window,has_MOM,has_SMB,has_RM_RF):
 
     #endregion
     #this will return a dataframe with dates and returns of the risk parity portfolio
-    return view_return
+    return view_weight,view_return
 
-EU_risk_parity = risk_parity(df_EU,36,True,True,True)
+weights, EU_risk_parity = risk_parity(df_EU,df_USEUR,"EU","US",True,36,True,True,True,True,True,True)
 # print("weights")
-# print(EU_weights, len(EU_weights))
+print(weights, len(weights))
 # print("variance")
 # print( EU_sigma_matrix, len(EU_sigma_matrix))
 #The length of the parity should be one shorter than the weights and variance, since it is the previous months weights and variance that is used for this months return
 # print("EU_risk_Parity_return")
-# print(EU_risk_parity, len(EU_risk_parity))
+print(EU_risk_parity, len(EU_risk_parity))
 # """
 # Small test to ckeck that the first and last return is as expected
 # """

@@ -21,11 +21,55 @@ for df in (df_EU, df_USEUR, df_US, df_long_EU, df_long_USEUR, df_long_US):
 
 
 # function to calculate mean (expected surplus) and the covariance matrix between surplus
-def mu_cov_func(df, start, n_months, cols, date_col="Date"):
-    df = df.copy()
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+# for one data set
+def mu_cov_func(df, start, n_months, cols, date_col="Date"): 
+    df = df.copy() 
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce") 
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
 
+    # when we start including data 
+    start = pd.Timestamp(start).to_period("M") 
+    end = start - 1
+
+    # begin = first day of the month n_months ago
+    begin = end - (n_months - 1)
+
+    # make sure we have defined interval:
+    mask = (df[date_col].dt.to_period("M") >= begin) & \
+           (df[date_col].dt.to_period("M") <= end) 
+    X = df.loc[mask, cols].dropna()
+
+    # values 
+    mu_m = X.mean() 
+    Sigma = X.cov() 
+    return mu_m, Sigma
+
+
+# we change to two inputs so we can compare data sets
+def mu_cov_pair(df_left, df_right, start, n_months, cols, suffixes=("EU", "US"), date_col="Date"):
+    L = df_left.copy()
+    R = df_right.copy()
+    L[date_col] = pd.to_datetime(L[date_col], errors="coerce")
+    R[date_col] = pd.to_datetime(R[date_col], errors="coerce")
+    for c in cols:
+        L[c] = pd.to_numeric(L[c], errors="coerce")
+        R[c] = pd.to_numeric(R[c], errors="coerce")
+    
+    # need to rename since we have same column names:
+    L = L.rename(columns={c: f"{c}_{suffixes[0]}" for c in cols})
+    R = R.rename(columns={c: f"{c}_{suffixes[1]}" for c in cols})
+
+    left_cols  = [f"{c}_{suffixes[0]}" for c in cols]
+    right_cols = [f"{c}_{suffixes[1]}" for c in cols]
+    wanted_cols = [date_col] + left_cols + right_cols
+    
+    # merge dataset and align on Date (inner join keeps common months only)
+    X = pd.merge(L[[date_col] + left_cols], 
+                 R[[date_col] + right_cols], 
+                 on=date_col, 
+                 how="inner"
+                 )
+    
     # when we start including data
     start = pd.Timestamp(start).to_period("M")
     end = start - 1
@@ -34,15 +78,23 @@ def mu_cov_func(df, start, n_months, cols, date_col="Date"):
     begin = end - (n_months - 1)  
 
     # make sure we have defined interval:
-    mask = (df[date_col].dt.to_period("M") >= begin) & \
-           (df[date_col].dt.to_period("M") <= end)
-    X = df.loc[mask, cols].dropna()
+    mask = (X[date_col].dt.to_period("M") >= begin) & \
+           (X[date_col].dt.to_period("M") <= end)
+    
+    Xw = X.loc[mask, wanted_cols].dropna()
+    if Xw.empty:
+        raise ValueError(f"No overlapping data in window {begin}..{end}. Check dates and overlap.")
 
     # values
-    mu_m = X.mean()
-    Sigma = X.cov()
-    return mu_m, Sigma
+    Xw_vals = Xw.drop(columns=[date_col])
+    mu_m = Xw_vals.mean()
+    Sigma = Xw_vals.cov()
 
+    # in case we need ordering
+    ordered = left_cols + right_cols
+    mu_m = mu_m[ordered]
+    Sigma = Sigma.loc[ordered, ordered]
+    return mu_m, Sigma
 
 
 # Loop over 6 relevant data set:
@@ -66,12 +118,18 @@ n_months = 36
 results = {}
 
 # run example
-for name, df in datasets.items():
-    mu, Sigma = mu_cov_func(df, start, n_months, cols)
-    results[name] = {"mu": mu, "Sigma": Sigma}
+# Pair 1: df_EU with df_USEUR  -> 6x6
+mu, Sigma = mu_cov_pair(df_EU, df_USEUR, start, n_months, cols, suffixes=("EU","US_EUR"))
+print(f"\n=== EU vs US(EUR) | window: {n_months} months ending before {start} ===")
+print("Mean vector (mu):")
+print(mu.to_string())
+print("\nCovariance matrix (Sigma):")
+print(Sigma)
 
-    print(f"\n=== {name} | window: {n_months} months ending before {start} ===")
-    print("Monthly expected surplus (mu):")
-    print(mu.to_string())
-    print("\nMonthly covariance matrix (Sigma):")
-    print(Sigma)
+# Pair 2: df_long_EU with df_long_USEUR  -> 6x6
+mu_long, Sigma_long = mu_cov_pair(df_long_EU, df_long_USEUR, start, n_months, cols, suffixes=("EU_long","US_long(EUR)"))
+print(f"\n=== EU Long vs US Long (EUR) | window: {n_months} months ending before {start} ===")
+print("Mean vector (mu):")
+print(mu_long.to_string())
+print("\nCovariance matrix (Sigma):")
+print(Sigma_long)

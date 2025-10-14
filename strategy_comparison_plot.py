@@ -10,6 +10,7 @@ from markowitz import markowitz_historical, returns_to_value
 # Read CSV files:
 
 EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
+US_data = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 
 columns_to_add = list(EU_data.columns[2:36])
 
@@ -27,7 +28,7 @@ def result_plot(data, window, n_points):
     markowitz_value = returns_to_value(markowitz_returns)
 
     # Use risk parity funciton to get risk parity return and value development
-    risk_parity_returns = np.array(risk_parity(EU_data,36,True,True,True)['return'])
+    risk_parity_returns = np.array(risk_parity(EU_data,US_data,"EU","US",False,36,True,True,True,True,True,True)['return'])
     risk_parity_value = returns_to_value(risk_parity_returns)
 
     # # Use markowitz function to get markowitz return of strategy with mu_target = average return from risk parity

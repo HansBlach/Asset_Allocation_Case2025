@@ -5,3 +5,4 @@ pandas==2.3.2
 numpy==2.3.3
 statsmodels==0.14.2
 scikit-learn==1.6.0
+openpyxl>=3.1

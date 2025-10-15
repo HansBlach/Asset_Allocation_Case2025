@@ -71,11 +71,11 @@ def mu_cov_pair(df_left, df_right, start, n_months, cols, suffixes=("EU", "US"),
                  )
     
     # when we start including data
-    start = pd.Timestamp(start).to_period("M")
+    start = pd.Timestamp(start).to_period("M")  # convert start correctly
     end = start - 1
-
+    
     # begin = first day of the month n_months ago
-    begin = end - (n_months - 1)  
+    begin = end - (n_months - 1)
 
     # make sure we have defined interval:
     mask = (X[date_col].dt.to_period("M") >= begin) & \
@@ -109,10 +109,10 @@ datasets = {
 
 # Relevant factors - may change after we have decided what is relevant
 cols = ["RM_RF", "SMB", "MOM"]
-# Start
-start = "2020-09"
+# Start december 24
+start = "2025-01"
 # We do 36 now for 3 years (can do lenght of dataset if we want all)
-n_months = 36
+n_months = len(df_EU)  
 
 # empty results
 results = {}

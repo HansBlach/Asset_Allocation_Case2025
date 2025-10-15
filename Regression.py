@@ -16,6 +16,7 @@ df_long_US = pd.read_csv("csv_files/long_EXPORT US USD.csv")
 
 # Define the target and explanatory variables
 explanatory_cols = ["RM_RF", "SMB", "MOM"]
+explanatory_cols = ["RM_RF", "SMB", "MOM"]
 
 def run_regression(df, explanatory_cols):
     # Fra chat: Coerce to numeric where possible and drop impossible rows per portfolio ---
@@ -113,7 +114,7 @@ results_df_long_USEUR = run_regression(df_long_USEUR, explanatory_cols)
 # Run regression for US USD
 results_df_long_US = run_regression(df_long_US, explanatory_cols)
 
-
+print(results_df_long_EU)
 
 ###################################
 # Print data i nyt format:

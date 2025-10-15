@@ -109,14 +109,16 @@ def risk_parity(csv1,csv2, market1, market2, include_market2, window,has_MOM1,ha
     #this will return a dataframe with dates and returns of the risk parity portfolio
     return view_return
 
-EU_risk_parity = risk_parity(df_EU,df_USEUR,"EU","US",True,36,True,True,True,True,True,True)
+#EU_risk_parity = risk_parity(df_EU,df_USEUR,"EU","US",True,36,True,True,True,True,True,True)
+
+
 # print("weights")
 #print(weights, len(weights))
 # print("variance")
 # print( EU_sigma_matrix, len(EU_sigma_matrix))
 #The length of the parity should be one shorter than the weights and variance, since it is the previous months weights and variance that is used for this months return
 # print("EU_risk_Parity_return")
-print(EU_risk_parity, len(EU_risk_parity))
+#print(EU_risk_parity, len(EU_risk_parity))
 # """
 # Small test to ckeck that the first and last return is as expected
 # """

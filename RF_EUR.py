@@ -39,7 +39,7 @@ import numpy as np
 
 # df.to_csv("yield_curve_data.csv")
 
-df = pd.read_csv("yield_curve_data.csv")
+df = pd.read_csv("csv_files/yield_curve_data.csv")
 
 
 # ---- Risk free rate ----
@@ -72,7 +72,7 @@ rf_df = pd.DataFrame({
     'RISK_FREE_RATE': RF
 })
 
-rf_df.to_csv('risk_free_rates_eur.csv', index=False)
+rf_df.to_csv('csv_files/risk_free_rates_eur.csv', index=False)
 
 # ---- ZCB prices ----
 

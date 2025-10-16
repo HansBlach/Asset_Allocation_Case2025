@@ -8,7 +8,7 @@ from risk_parity import risk_parity
 
 from markowitz import markowitz_historical, returns_to_value
 
-allow_short = False
+allow_short = True
 
 EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
 
@@ -97,7 +97,6 @@ for i in range(n_bootstrap):
     mean_market.append(annualizer(np.mean(market_returns), type="return"))
     std_market.append(annualizer(np.std(market_returns), type="volatility"))
 
-    
 
 sharpe_markowitz = np.array(mean_markowitz)/np.array(std_markowitz)
 

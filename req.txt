@@ -1,0 +1,8 @@
+# Indsæt de pakker I bruger og nyeste versioner her, så arbejder vi alle med det samme:
+# I kan køre nedenstående linje i jeres terminal og så downloader den alle pakkerne:
+# pip install -r req.txt
+pandas==2.3.2
+numpy==2.3.3
+statsmodels==0.14.2
+scikit-learn==1.6.0
+openpyxl>=3.1

@@ -9,8 +9,8 @@ from markowitz import markowitz_historical, returns_to_value
 
 # Read CSV files:
 
-EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
-US_data = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
+EU_data = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
 
 print(EU_data['Date'])
 
@@ -36,7 +36,7 @@ columns_to_add = list(EU_data.columns[2:36])
 EU_data[columns_to_add] = EU_data[columns_to_add].add(EU_data['RF'], axis=0)
 US_data[columns_to_add] = US_data[columns_to_add].add(US_data['RF'], axis=0)
 
-def result_plot(EU_data, US_data, window, n_points, name = "", data = "both", baseline_market = "EU", has_MOM1=True,has_MOM2=True,has_SMB1=True,has_SMB2=True,has_RM_RF1=True,has_RM_RF2=True):
+def result_plot(EU_data, US_data, window, n_points, markowitz_short = False, name = "", data = "both", baseline_market = "EU", has_MOM1=True,has_MOM2=True,has_SMB1=True,has_SMB2=True,has_RM_RF1=True,has_RM_RF2=True):
     if data == "both":
         include_market2 = True
     if data == "EU" or data == "US":
@@ -55,7 +55,7 @@ def result_plot(EU_data, US_data, window, n_points, name = "", data = "both", ba
         markowitz_data = US_data[list(US_data.columns[5:36])]
     
     # Use markowitz function to get markowitz return and value development of tangent strategy
-    markowitz_returns = markowitz_historical(markowitz_data, window, n_points = n_points)
+    markowitz_returns = markowitz_historical(markowitz_data, window, n_points = n_points, allow_short=markowitz_short)
     markowitz_value = returns_to_value(markowitz_returns)
 
     # Use risk parity funciton to get risk parity return and value development
@@ -92,12 +92,20 @@ def result_plot(EU_data, US_data, window, n_points, name = "", data = "both", ba
 
 window = 36
 
-n_points = 15
+n_points = 10
 
-result_plot(EU_data, US_data, window, n_points, data = "both", baseline_market= "EU", name = "Both Markets")
+EU_data = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
 
-result_plot(EU_data, US_data, window, n_points, data = "EU", baseline_market= "EU", name = "EU Only")
+EU_data_long = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
+US_data_long = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 
-# result_plot(EU_data, US_data, window, n_points, data = "both", baseline_market= "EU", has_SMB1=False, has_SMB2= False, name = "noSMB")
+#result_plot(EU_data, US_data, window, n_points, data = "both", baseline_market= "EU", name = "Both Markets")
+
+result_plot(EU_data_long, US_data_long, window, n_points, data = "EU", baseline_market= "EU", name = "long only")
+
+
+
+result_plot(EU_data, US_data, window, n_points, markowitz_short= True, data = "EU", baseline_market= "EU", name = "short allowed")
 
 # result_plot(EU_data, US_data, window, n_points, data = "both", baseline_market= "EU", has_SMB1=False, has_SMB2= False, has_MOM2= False, name = "noSMB_noMOMUS")

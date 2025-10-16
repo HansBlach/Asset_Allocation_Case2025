@@ -17,25 +17,36 @@ def return_variance_period(returns: np.ndarray, start_index: int, window: int) -
     sub_vector = returns[start_index : start_index + window]
     return return_variance(sub_vector)
 
-def rolling_variance(returns: np.ndarray, window: int) -> np.ndarray:
-    """
-    Compute rolling variance of returns over a moving window.
-    Returns an array of variances with length len(returns) - window + 1.
-    """
-    variances = np.empty(len(returns) - window + 1)
-    for i in range(len(variances)):
-        variances[i] = return_variance_period(returns, i, window)
-    return variances
+# def rolling_variance(returns: np.ndarray, window: int) -> np.ndarray:
+#     """
+#     Compute rolling variance of returns over a moving window.
+#     Returns an array of variances with length len(returns) - window + 1.
+#     """
+#     variances = np.empty(len(returns) - window + 1)
+#     for i in range(len(variances)):
+#         variances[i] = return_variance_period(returns, i, window)
+#     return variances
 
-def risk_parity_weights(variances_matrix: np.ndarray) -> np.ndarray:
-    """
-    Compute risk parity weights given a matrix of variances.
-    Each row = time step, each column = asset type.
-    Returns a matrix of same shape with weights.
-    """
-    inv_var = 1 / variances_matrix  # inverse variance
-    weights = inv_var / np.sum(inv_var, axis=1, keepdims=True)
-    return weights
+
+# def risk_parity_weights(variances_matrix: np.ndarray) -> np.ndarray:
+#     """
+#     Compute risk parity weights given a matrix of variances.
+#     Each row = time step, each column = asset type.
+#     Returns a matrix of same shape with weights.
+#     """
+#     inv_var = 1 / variances_matrix  # inverse variance
+#     weights = inv_var / np.sum(inv_var, axis=1, keepdims=True)
+#     return weights
+
+def rolling_variance(returns: np.ndarray, window: int) -> np.ndarray:
+    out = np.empty(len(returns) - window + 1)
+    for i in range(out.shape[0]):
+        out[i] = np.std(returns[i:i+window], ddof=1)   # sample std
+    return out
+
+def risk_parity_weights(std_matrix: np.ndarray) -> np.ndarray:
+    inv_vol = 1.0 / std_matrix
+    return inv_vol / inv_vol.sum(axis=1, keepdims=True)
 
 def apply_weights_to_next_month_returns(weights: np.ndarray, returns: np.ndarray, window: int) -> np.ndarray:
     # Make sure shapes match

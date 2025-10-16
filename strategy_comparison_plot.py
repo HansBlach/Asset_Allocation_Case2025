@@ -88,6 +88,8 @@ def result_plot(EU_data, US_data, window, n_points, markowitz_short = False, nam
     plt.legend()
     plt.savefig(f"result_plot_{name}.png")
     #plt.show()
+
+    return markowitz_returns, risk_parity_returns, market_returns
     
 
 window = 36
@@ -102,10 +104,28 @@ US_data_long = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 
 #result_plot(EU_data, US_data, window, n_points, data = "both", baseline_market= "EU", name = "Both Markets")
 
-result_plot(EU_data_long, US_data_long, window, n_points, data = "EU", baseline_market= "EU", name = "long only")
+markowitz_returns, risk_parity_returns, market_returns = result_plot(EU_data_long, US_data_long, window, n_points, data = "both", baseline_market= "EU", name = "long only")
 
+def summarize_strategies(markowitz_returns, risk_parity_returns, market_returns):    
+    strategies = {
+        "Markowitz": markowitz_returns,
+        "Risk Parity": risk_parity_returns,
+        "Market": market_returns
+    }
+    
+    data = []
+    for name, returns in strategies.items():
+        mean = np.mean(returns)
+        std = np.std(returns)
+        sharpe = (mean) / std if std != 0 else np.nan
+        data.append([mean, std, sharpe])
+    
+    summary = pd.DataFrame(data, columns=["Mean", "Std", "Sharpe"], index=strategies.keys())
+    return summary
 
+summary_table = summarize_strategies(markowitz_returns, risk_parity_returns, market_returns)
+print(summary_table)
 
-result_plot(EU_data, US_data, window, n_points, markowitz_short= True, data = "EU", baseline_market= "EU", name = "short allowed")
+# result_plot(EU_data, US_data, window, n_points, markowitz_short= True, data = "EU", baseline_market= "EU", name = "short allowed")
 
 # result_plot(EU_data, US_data, window, n_points, data = "both", baseline_market= "EU", has_SMB1=False, has_SMB2= False, has_MOM2= False, name = "noSMB_noMOMUS")

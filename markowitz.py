@@ -100,8 +100,8 @@ def efficient_frontier(mean_return, cov_matrix, n_points=150, allow_short = Fals
                 frontier_returns.append(port_return)
                 frontier_variance.append(np.sqrt(port_var))
                 frontier_weights.append(w)
-            else:
-                print(f"Optimization failed for target return {mu:.4f}: {res.message}")
+            # else:
+            #     print(f"Optimization failed for target return {mu:.4f}: {res.message}")
     if not allow_short:
         for mu in target_returns:
             res = markowitz_optimizer(mean_return, cov_matrix, mu, direction="min")
@@ -112,8 +112,8 @@ def efficient_frontier(mean_return, cov_matrix, n_points=150, allow_short = Fals
                 frontier_returns.append(port_return)
                 frontier_variance.append(np.sqrt(port_var))
                 frontier_weights.append(w)
-            else:
-                print(f"Optimization failed for target return {mu:.4f}: {res.message}")
+            # else:
+            #     print(f"Optimization failed for target return {mu:.4f}: {res.message}")
 
     return np.array(frontier_variance), np.array(frontier_returns), np.array(frontier_weights)
 

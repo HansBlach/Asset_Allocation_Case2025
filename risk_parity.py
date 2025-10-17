@@ -205,28 +205,49 @@ def risk_parity(csv1, csv2, market1, market2, include_market2, window,
         w_RF = np.zeros(T)
         W_scaled = W.copy()
     else:
-        # Shorting allowed + target_std scaling (BUT: SMB/MOM stay >= 0; market capped at 1)
+       # --- Shorting allowed + target_std scaling (BUT: SMB/MOM >= 0; RM capped) ---
         if target_std is None:
             raise ValueError("allow_short=True requires target_std.")
-        base_std = portfolio_std(R, W, window)
-        alpha_target = target_std / base_std
-        # Market cap alpha per window (so that all RM columns stay <= 1)
-        # alpha_cap = min over market columns of 1 / W[:, i] (avoid div-by-zero)
-        alpha_cap = np.full(T, np.inf)
+
+        # base portfolio std using full covariance Σ_t
+        base_std = portfolio_std(R, W, window)            # shape (T,)
+        alpha_target = target_std / base_std               # desired scaling to hit target
+
+        # per-market cap (keep each RM_RF_* <= 1)
+        alpha_cap_each = np.full_like(alpha_target, np.inf, dtype=float)
         for i in market_cols:
             wi = W[:, i]
+            # if wi==0, that asset doesn't constrain scaling
             cap_i = np.where(wi > 0, 1.0 / wi, np.inf)
-            alpha_cap = np.minimum(alpha_cap, cap_i)
+            alpha_cap_each = np.minimum(alpha_cap_each, cap_i)
 
-        alpha = np.minimum(alpha_target, alpha_cap)
+        # NEW: global market cap (keep total RM exposure across BOTH markets <= 1)
+        market_base = W[:, market_cols].sum(axis=1)               # sum of all RM columns before scaling
+        alpha_cap_total = np.where(market_base > 0, 1.0 / market_base, np.inf)
+
+        # choose the tightest cap
+        alpha = np.minimum(alpha_target, np.minimum(alpha_cap_each, alpha_cap_total))
+
+        # scale
         W_scaled = W * alpha[:, None]
 
-        # Re-enforce constraints strictly (numerical safety)
+        # numeric safety: enforce per-asset and total market caps exactly
+        # (1) hard per-asset clamp
         for i in market_cols:
             W_scaled[:, i] = np.minimum(W_scaled[:, i], 1.0)
-        W_scaled = np.clip(W_scaled, 0, None)  # keep SMB/MOM >= 0
 
-        # RF reported as residual 1 - sum of market allocations (can be 0 if cap binds)
+        # (2) hard total clamp (preserve proportions among market legs)
+        sum_market = W_scaled[:, market_cols].sum(axis=1)
+        over = sum_market > 1.0 + 1e-12
+        if np.any(over):
+            idx = np.where(over)[0]
+            for t in idx:
+                W_scaled[t, market_cols] *= (1.0 / sum_market[t])  # scale down both markets proportionally
+
+        # keep SMB/MOM non-negative
+        W_scaled = np.clip(W_scaled, 0, None)
+
+        # RF reported as residual against TOTAL market exposure
         w_RF = 1.0 - W_scaled[:, market_cols].sum(axis=1)
         w_RF = np.maximum(w_RF, 0.0)
 
@@ -243,23 +264,27 @@ def risk_parity(csv1, csv2, market1, market2, include_market2, window,
     view_weight["market_capped"] = (view_weight["sum_market"] >= 1.0 - 1e-12)
 
     # Variance view = rolling stds of risky factors (no RF)
-    view_Var = pd.DataFrame(std_matrix, columns=names)
-    view_Var.insert(0, "Date", aligned_dates)
+    view_std = pd.DataFrame(std_matrix, columns=names)
+    view_std.insert(0, "Date", aligned_dates)
 
     # Returns use risky weights only (RF has zero excess return)
     strat_returns = apply_weights_to_next_month_returns(W_scaled, R, window)
     view_return = pd.DataFrame({"Date": aligned_dates_return, "return": strat_returns})
 
-    return view_weight, view_Var, view_return
+    return view_weight, view_std, view_return
 
 
 
-
+#You can now chose to short the model by chosing the portfolios with allow_short = True, and set a target standard deviation for the portfolio with target_std.
+#The max short is when the market rate is fully invested so it equals 1. if less then one and shorting is allowed the rest is invested in risk free rate.
+#The target std is hit by using the std matrix computed from the rolling std function. The target std represents the portfolios desired risk level, and not the markets risk level.
 # Example usage:
-weights, variances, returns = risk_parity(df_EU, df_USEUR, "EU", "US", True, 12,
+weights, std, returns = risk_parity(df_EU, df_USEUR, "EU", "US", True, 36,
                                           True, True, True,
                                           True, True, True,
-                                          use_covariance=False, allow_short=True, target_std=0)
+                                          use_covariance=False, allow_short=True, target_std=3)
+# everything in percentages not decimals
 print(weights.head())
-print(variances.head())
+print(std.head())
 print(returns.head())
+print(np.mean(returns['return']))

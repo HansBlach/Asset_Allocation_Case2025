@@ -52,8 +52,8 @@ BETA_0 = np.array(df_pivot['BETA0'].values)/100
 BETA_1 = np.array(df_pivot['BETA1'].values)/100
 BETA_2 = np.array(df_pivot['BETA2'].values)/100
 BETA_3 = np.array(df_pivot['BETA3'].values)/100
-TAU_1  = np.array(df_pivot['TAU1'].values)/100
-TAU_2  = np.array(df_pivot['TAU2'].values)/100
+TAU_1  = np.array(df_pivot['TAU1'].values)
+TAU_2  = np.array(df_pivot['TAU2'].values)
 
 TTM = 1/12
 
@@ -94,28 +94,25 @@ def zcb_price_generator(TTM, N, start, data):
     BETA_1 = np.array(df_pivot['BETA1'].values)/100
     BETA_2 = np.array(df_pivot['BETA2'].values)/100
     BETA_3 = np.array(df_pivot['BETA3'].values)/100
-    TAU_1  = np.array(df_pivot['TAU1'].values)/100
-    TAU_2  = np.array(df_pivot['TAU2'].values)/100
+    TAU_1  = np.array(df_pivot['TAU1'].values)
+    TAU_2  = np.array(df_pivot['TAU2'].values)
 
-
-    if len(BETA_0) < N + start:
-        print("Start should be 10 or more years from final observation")
-        return ""
 
     # Calculate zcb prices
     zcb_prices = np.zeros(N)
     period_length = TTM/N
 
-    for i in range(N):
-        TTM = TTM - period_length
 
-        z = BETA_0[i + start] + BETA_1[i + start]*(1-np.exp(-TTM/TAU_1[i + start]))/(TTM/TAU_1[i + start]) 
-        + BETA_2[i + start]*((1-np.exp(-TTM/TAU_1[i + start]))/(TTM/TAU_1[i + start])-np.exp(-TTM/TAU_1[i + start])) 
-        + BETA_3[i + start]*((1-np.exp(-TTM/TAU_2[i + start]))/(TTM/TAU_2[i + start])-np.exp(-TTM/TAU_2[i + start]))
+    for i in range(start, N + start):
+        TTM_ = TTM - period_length * (i - start)
+        #print(i, BETA_0[i], BETA_1[i], BETA_2[i], BETA_3[i])
 
-        zcb_prices[i] = np.exp(-TTM*z)
+        z = (BETA_0[i] + BETA_1[i]*(1-np.exp(-TTM_/TAU_1[i]))/(TTM_/TAU_1[i]) + BETA_2[i]*((1-np.exp(-TTM_/TAU_1[i]))/(TTM_/TAU_1[i])-np.exp(-TTM_/TAU_1[i])) + BETA_3[i]*((1-np.exp(-TTM_/TAU_2[i]))/(TTM_/TAU_2[i])-np.exp(-TTM_/TAU_2[i])))
+
+        zcb_prices[i - start] = np.exp(-TTM_*z)
 
     return zcb_prices
 
+# print(zcb_price_generator(TTM, N, 25, df))
 
 

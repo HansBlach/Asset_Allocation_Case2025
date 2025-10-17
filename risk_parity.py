@@ -9,143 +9,249 @@ df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
 df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
 df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
 
+import numpy as np
+import pandas as pd
+
+
 # -----------------------------
 # Rolling standard deviation
 # -----------------------------
-def rolling_std(returns: np.ndarray, window: int) -> np.ndarray:
-    stds = np.empty(len(returns) - window + 1)
-    for i in range(len(stds)):
-        stds[i] = np.std(returns[i : i + window], ddof=1)
-    return stds
+def rolling_std(x: np.ndarray, window: int) -> np.ndarray:
+    out = np.empty(len(x) - window + 1)
+    for i in range(len(out)):
+        out[i] = np.std(x[i:i+window], ddof=1)
+    return out
+
 
 # -----------------------------
-# Portfolio volatility helper
+# Rolling covariance (T x N x N)
 # -----------------------------
-def portfolio_std(returns: np.ndarray, weights: np.ndarray, window: int) -> np.ndarray:
-    port_std = np.empty(len(returns) - window + 1)
-    for i in range(len(port_std)):
-        window_returns = returns[i:i+window, :]
-        cov = np.cov(window_returns.T)
-        w = weights[i, :].reshape(-1, 1)
-        port_std[i] = np.sqrt(float(w.T @ cov @ w))
-    return port_std
+def rolling_covariance(R: np.ndarray, window: int) -> np.ndarray:
+    T = len(R) - window + 1
+    N = R.shape[1]
+    covs = np.empty((T, N, N))
+    for i in range(T):
+        covs[i] = np.cov(R[i:i+window].T)
+    return covs
+
 
 # -----------------------------
-# Apply weights to next-period returns
+# Equal-risk weights (variance-only): 1/std normalize
+# (non-negative by construction)
 # -----------------------------
-def apply_weights_to_next_month_returns(weights: np.ndarray, returns: np.ndarray, window: int) -> np.ndarray:
-    M = min(weights.shape[0], len(returns) - window)
-    next_month_returns = returns[window : window + M, :]
-    strat_returns = np.einsum('ij,ij->i', next_month_returns, weights[:M, :])
-    return strat_returns
+def inv_vol_weights(std_matrix: np.ndarray) -> np.ndarray:
+    invs = 1.0 / std_matrix
+    return invs / invs.sum(axis=1, keepdims=True)
+
 
 # -----------------------------
-# Data generator for one market
+# ERC via iterative equalization of risk contributions on Σ
+# Constraints enforced each iteration:
+# - w >= 0 for all
+# - w_RM per market <= 1
+# - sum(w) == 1 (long-only normalization inside; scaling handled later)
+# This is a practical heuristic that converges well for ERC.
 # -----------------------------
-def data_generator(csv, market, window, has_MOM, has_SMB, has_RM_RF):
-    std_list, return_list, names = [], [], []
+def erc_weights_from_cov(cov: np.ndarray,
+                         market_cols: list[int],
+                         max_iter: int = 200,
+                         tol: float = 1e-8) -> np.ndarray:
+    N = cov.shape[0]
+    # Start from inverse-vol long-only
+    stds = np.sqrt(np.diag(cov))
+    w = 1.0 / stds
+    w = np.clip(w, 0, None)
+    s = w.sum()
+    if s == 0:
+        w = np.full(N, 1.0 / N)
+    else:
+        w /= s
+
+    # Iterate to equalize risk contributions
+    for _ in range(max_iter):
+        # Risk contributions RC_i = w_i * (Σ w)_i
+        Sigma_w = cov @ w
+        RC = w * Sigma_w
+        RC_mean = RC.mean()
+        # Multiplicative update: push each RC towards the mean
+        # (avoid div-by-zero)
+        adj = np.where(RC > 0, RC_mean / RC, 0.0)
+        w = w * adj
+
+        # Enforce constraints each iteration
+        w = np.clip(w, 0, None)                   # non-negative for all
+        if market_cols:
+            w[market_cols] = np.minimum(w[market_cols], 1.0)  # cap each RM at 1
+        s = w.sum()
+        if s == 0:
+            w = np.full(N, 1.0 / N)
+        else:
+            w /= s  # long-only normalization here
+
+        # Check convergence on risk contributions
+        Sigma_w = cov @ w
+        RC = w * Sigma_w
+        if np.max(np.abs(RC - RC.mean())) < tol:
+            break
+
+    return w
+
+
+# -----------------------------
+# Portfolio rolling std given weights (aligned to window end)
+# -----------------------------
+def portfolio_std(R: np.ndarray, W: np.ndarray, window: int) -> np.ndarray:
+    T = len(R) - window + 1
+    out = np.empty(T)
+    for i in range(T):
+        cov = np.cov(R[i:i+window].T)
+        w = W[i].reshape(-1, 1)
+        out[i] = np.sqrt(float(w.T @ cov @ w))
+    return out
+
+
+# -----------------------------
+# Apply weights to next-period returns (alignment +1)
+# -----------------------------
+def apply_weights_to_next_month_returns(W: np.ndarray, R: np.ndarray, window: int) -> np.ndarray:
+    M = min(W.shape[0], len(R) - window)
+    nxt = R[window:window+M, :]
+    return np.einsum('ij,ij->i', nxt, W[:M, :])
+
+
+# -----------------------------
+# Factor extraction per market (respect includes)
+# Returns (R_list, std_list, names) where order is RM_RF, MOM, SMB if present
+# -----------------------------
+def gather_market(csv, market, window, has_MOM, has_SMB, has_RM_RF):
+    R_list, std_list, names = [], [], []
 
     if has_RM_RF:
-        RM_RF = csv['RM_RF'].to_numpy()
-        std_list.append(rolling_std(RM_RF, window))
-        return_list.append(RM_RF)
-        names.append("RM_RF_" + market)
+        x = csv['RM_RF'].to_numpy()
+        R_list.append(x)
+        std_list.append(rolling_std(x, window))
+        names.append(f"RM_RF_{market}")
 
     if has_MOM:
-        MOM = csv['MOM'].to_numpy()
-        std_list.append(rolling_std(MOM, window))
-        return_list.append(MOM)
-        names.append("MOM_" + market)
+        x = csv['MOM'].to_numpy()
+        R_list.append(x)
+        std_list.append(rolling_std(x, window))
+        names.append(f"MOM_{market}")
 
     if has_SMB:
-        SMB = csv['SMB'].to_numpy()
-        std_list.append(rolling_std(SMB, window))
-        return_list.append(SMB)
-        names.append("SMB_" + market)
+        x = csv['SMB'].to_numpy()
+        R_list.append(x)
+        std_list.append(rolling_std(x, window))
+        names.append(f"SMB_{market}")
 
-    return return_list, std_list, names
+    return R_list, std_list, names
+
 
 # -----------------------------
-# Main Risk Parity Function (two markets)
+# Main: two-market risk parity with optional ERC (covariance)
 # -----------------------------
 def risk_parity(csv1, csv2, market1, market2, include_market2, window,
                 has_MOM1, has_SMB1, has_RM_RF1,
                 has_MOM2, has_SMB2, has_RM_RF2,
                 use_covariance=False, allow_short=False, target_std=None):
-    """
-    Two-market Risk Parity with non-negative MOM/SMB, RM caps at 1, shared RF residual.
-    """
 
     pd.set_option('display.precision', 6)
     date = csv1['Date'].to_numpy().astype(str)
 
-    # --- gather factors ---
-    r_list1, v_list1, n_list1 = data_generator(csv1, market1, window, has_MOM1, has_SMB1, has_RM_RF1)
-    r_list2, v_list2, n_list2 = data_generator(csv2, market2, window, has_MOM2, has_SMB2, has_RM_RF2)
+    # Gather factors (order preserved per market: RM_RF, MOM, SMB if included)
+    R1, S1, N1 = gather_market(csv1, market1, window, has_MOM1, has_SMB1, has_RM_RF1)
+    R2, S2, N2 = gather_market(csv2, market2, window, has_MOM2, has_SMB2, has_RM_RF2)
 
     if include_market2:
-        std_matrix = np.column_stack(v_list1 + v_list2)
-        r_matrix = np.column_stack(r_list1 + r_list2)
-        names = n_list1 + n_list2
+        R = np.column_stack(R1 + R2)   # full returns matrix (T_full x N)
+        std_matrix = np.column_stack(S1 + S2)  # (T x N)
+        names = N1 + N2
     else:
-        std_matrix = np.column_stack(v_list1)
-        r_matrix = np.column_stack(r_list1)
-        names = n_list1
+        R = np.column_stack(R1)
+        std_matrix = np.column_stack(S1)
+        names = N1
 
-    # --- Base equal-risk (1/std)
-    inv_std = 1 / std_matrix
-    risky_weights = inv_std / np.sum(inv_std, axis=1, keepdims=True)
-    risky_weights = np.clip(risky_weights, 0, None)   # ensure no negatives
+    T = len(R) - window + 1
+    N = len(names)
 
-    # --- Identify market columns for cap enforcement
-    market_cols = [i for i, n in enumerate(names) if "RM_RF" in n]
+    # Identify market columns for caps (each "RM_RF_*")
+    market_cols = [i for i, nm in enumerate(names) if nm.startswith("RM_RF_")]
 
-    # --- Scaling
-    if not allow_short:
-        # Long-only: normalize to sum=1 across risky assets (fully invested)
-        risky_weights = risky_weights / np.sum(risky_weights, axis=1, keepdims=True)
-        # Enforce market cap ≤1
+    # --- Compute base risky weights per window
+    W = np.zeros((T, N))
+
+    if use_covariance:
+        # ERC per window using rolling Σ, with constraints
+        Covs = rolling_covariance(R, window)
+        for t in range(T):
+            W[t] = erc_weights_from_cov(Covs[t], market_cols)
+    else:
+        # Inverse-vol parity (variance-only)
+        W = inv_vol_weights(std_matrix)
+        # Non-negativity already guaranteed; still cap RM at 1 defensively and renormalize (no shorting baseline)
         for i in market_cols:
-            risky_weights[:, i] = np.minimum(risky_weights[:, i], 1.0)
-        w_RF = np.zeros(len(risky_weights))  # RF not used (fully invested)
+            W[:, i] = np.minimum(W[:, i], 1.0)
+        # Normalize to sum 1 (long-only baseline)
+        W = W / W.sum(axis=1, keepdims=True)
+
+    # --- Mode handling
+    if not allow_short:
+        # Long-only mode: fully invested in risky factors
+        # (already normalized to sum 1 from both branches above)
+        # Re-enforce RM caps (should already hold)
+        for i in market_cols:
+            W[:, i] = np.minimum(W[:, i], 1.0)
+        # RF is not used; report 0 for convenience
+        w_RF = np.zeros(T)
+        W_scaled = W.copy()
     else:
+        # Shorting allowed + target_std scaling (BUT: SMB/MOM stay >= 0; market capped at 1)
         if target_std is None:
-            raise ValueError("allow_short=True requires target_std to be set.")
-
-        base_std = portfolio_std(r_matrix, risky_weights, window)
+            raise ValueError("allow_short=True requires target_std.")
+        base_std = portfolio_std(R, W, window)
         alpha_target = target_std / base_std
+        # Market cap alpha per window (so that all RM columns stay <= 1)
+        # alpha_cap = min over market columns of 1 / W[:, i] (avoid div-by-zero)
+        alpha_cap = np.full(T, np.inf)
+        for i in market_cols:
+            wi = W[:, i]
+            cap_i = np.where(wi > 0, 1.0 / wi, np.inf)
+            alpha_cap = np.minimum(alpha_cap, cap_i)
 
-        # Market-cap limit scaling per window
-        alpha_cap = np.min(1.0 / risky_weights[:, market_cols], axis=1)
         alpha = np.minimum(alpha_target, alpha_cap)
+        W_scaled = W * alpha[:, None]
 
-        risky_weights = risky_weights * alpha[:, None]
+        # Re-enforce constraints strictly (numerical safety)
+        for i in market_cols:
+            W_scaled[:, i] = np.minimum(W_scaled[:, i], 1.0)
+        W_scaled = np.clip(W_scaled, 0, None)  # keep SMB/MOM >= 0
 
-        # RF residual = 1 - sum of market weights (shared across markets)
-        w_RF = 1 - np.sum(risky_weights[:, market_cols], axis=1)
-        w_RF = np.clip(w_RF, 0, None)
+        # RF reported as residual 1 - sum of market allocations (can be 0 if cap binds)
+        w_RF = 1.0 - W_scaled[:, market_cols].sum(axis=1)
+        w_RF = np.maximum(w_RF, 0.0)
 
-    # --- Build final outputs
+    # --- Outputs
     aligned_dates = date[window - 1:]
     aligned_dates_return = date[window:]
 
-    # Combine RF + risky weights
+    # Weights (RF + all risky)
     view_weight = pd.DataFrame({"Date": aligned_dates, "RF": w_RF})
-    for i, name in enumerate(names):
-        view_weight[name] = risky_weights[:, i]
-    view_weight["sum_risky"] = risky_weights.sum(axis=1)
-    view_weight["sum_market"] = risky_weights[:, market_cols].sum(axis=1)
-    view_weight["market_capped"] = (view_weight["sum_market"] >= 0.999)
+    for j, nm in enumerate(names):
+        view_weight[nm] = W_scaled[:, j]
+    view_weight["sum_risky"] = W_scaled.sum(axis=1)
+    view_weight["sum_market"] = W_scaled[:, market_cols].sum(axis=1)
+    view_weight["market_capped"] = (view_weight["sum_market"] >= 1.0 - 1e-12)
 
-    # Variance table: only risky factors
+    # Variance view = rolling stds of risky factors (no RF)
     view_Var = pd.DataFrame(std_matrix, columns=names)
     view_Var.insert(0, "Date", aligned_dates)
 
-    # Portfolio returns (RF adds no excess return)
-    strat_returns = apply_weights_to_next_month_returns(risky_weights, r_matrix, window)
+    # Returns use risky weights only (RF has zero excess return)
+    strat_returns = apply_weights_to_next_month_returns(W_scaled, R, window)
     view_return = pd.DataFrame({"Date": aligned_dates_return, "return": strat_returns})
 
     return view_weight, view_Var, view_return
+
 
 
 
@@ -153,7 +259,7 @@ def risk_parity(csv1, csv2, market1, market2, include_market2, window,
 weights, variances, returns = risk_parity(df_EU, df_USEUR, "EU", "US", True, 12,
                                           True, True, True,
                                           True, True, True,
-                                          use_covariance=False, allow_short=False, target_std=2)
+                                          use_covariance=False, allow_short=True, target_std=0)
 print(weights.head())
 print(variances.head())
 print(returns.head())

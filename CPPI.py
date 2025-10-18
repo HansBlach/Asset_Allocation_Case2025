@@ -13,7 +13,7 @@ from markowitz import markowitz_historical
 
 @dataclass
 class CPPIParams:
-    m: float = 3             # CPPI multiplier (>=1)
+    m: float = 1             # CPPI multiplier (>=1)
     b: float = 1.0           # max leverage ratio (keep at 1.0 for "no leverage")
     W0: float = 100.0        # initial wealth
     F0: float = 80.0         # initial floor in currency (e.g., 80 for 80/20 split)
@@ -44,42 +44,39 @@ def CPPI(
     b = cppip.b
     W0 = cppip.W0
     F0 = cppip.F0
+
+    # Starting values for price processes
+    R = zcb_prices[0]                                  
+    A = 1     
     cushion = max(W0 - F0, 0.0)
-    E = min(m * cushion, b * W0)    # Exposure
+    E0 = min(m * cushion, b * W0)    # Exposure
     
     # Initial allocation proportions
-    eta_A = E / 1                               # units of active
-    eta_R = (W0 - E)/zcb_prices[0]             # units of ZCB
+    eta_A = E0 / A                               # units of active
+    eta_R = (W0 - E0)/R             # units of ZCB
 
     # Initial guarantee units N0 from floor and current ZCB price
-    N = F0 / zcb_prices[0]
-    F = N * zcb_prices[0]
-    
-    # Starting values for price processes
-    R = zcb_prices[0]                                  # start exactly at target funded ratio
-    A = 1                                # Rest in active
-
-    # initial allocations
-    MV_A = eta_A * A
-    MV_R = eta_R * R
+    N = F0/ R
+    F = N * R                          
 
     # ---- Store results ----
 
     rows = []
     rows.append({
         "month": 0,
-        "MV_A": MV_A,
-        "MV_R": MV_R,
-        "W": MV_A + MV_R,
-        "Floor": F0,
+        "A": A,
+        "MV_A": eta_A*A,
+        "MV_R": eta_R*R,
+        "W": eta_A*A + eta_R*R,
+        "Floor": F,
         "Cushion": cushion,
         "N": N,
-        "P": zcb_prices[0],
+        "P": R,
         "C": contributions[0],
-        "c_A": contributions[0]*MV_A/W0, 
-        "c_R": contributions[0]*MV_R/W0,
-        "L": (MV_A + MV_R) / MV_R,          # Her genbruger vi konceptet med funded ratio
-        "tie_in": False,                    # Vi kalder den tie-in hvis vi ændrer floor
+        "c_A": 0, 
+        "c_R": 0,
+        "L": (eta_A * A + eta_R * R) / F,           # Her genbruger vi konceptet med funded ratio
+        "tie_in": False,                            # Vi kalder den tie-in hvis vi ændrer floor
     })
 
     # ---- Iterate months 1 to T ----
@@ -87,71 +84,68 @@ def CPPI(
         # New market values
         A = (1+ active_returns[t-1]) * A
         R = zcb_prices[t]
-        # Evolve holdings to new market values
-        W = eta_A * A + eta_R * R
-        F = N * zcb_prices[t]
+        # Evolve holdings to new market values before contributions
+        W_pre = eta_A * A + eta_R * R
+        F_pre = N * R
+        cushion = max(W_pre - F_pre, 0)
 
-        cushion = max(W - F, 0)
-        E = min(m * cushion, b * W)
-
+        # Exposure
+        E = min(m * cushion, b * W_pre)
 
         eta_A = E / A
-        eta_R = (W - E) / R
+        eta_R = (W_pre - E) / R
 
-        # Add the new contribution in the same proportion as the eta's
-
-        weight_A = E/W
-        weight_R = (W-E)/W
-
-        c_A = contributions[t]*weight_A
-        c_R = contributions[t]*weight_R
-        
-
-        MV_A = eta_A * A + c_A
-        MV_R = eta_R * R + c_R
-
-        # Calculate floor ratio
-        Floor_ratio = (MV_A + MV_R) / MV_R
-        tie_in = Floor_ratio > cppip.F_trigger
-
-        # Vi genbruger tie-in for at kunne sammenligne pr. Michael
+        # funded ratio before contributions for tie-in logic
+        L_pre = (W_pre / F_pre)
+        tie_in = (L_pre > cppip.F_trigger)
         if tie_in:
-            N_new = W / (cppip.F_target * zcb_prices[t])     
-            # new reserve and active
-            MV_R = N_new * zcb_prices[t]
-            MV_A = W - MV_R
+            # enforce target funded ratio by lifting the floor (i.e., moving more into reserve)
+            # W_pre / (F_target) = reserve after tie-in
+            MV_R_target = W_pre / cppip.F_target
+            eta_R = MV_R_target / R
+            eta_A = (W_pre - MV_R_target) / A
         
-        # Calculate contributions based on the value of active/reserve portfolio
         # HER SKAL VI ALTSÅ LIGE OVERVEJE MICHAELS MAIL:
         # FLOOR ÆNDRER SIG EFTER AKTIVER, MEN VI INDBETALER EFTER TARGTET????
         C = contributions[t]        
         c_R = C / cppip.F_target
         c_A = C - c_R
-        # 4) Update active and reserve with contributions
-        MV_R += c_R
-        MV_A += c_A
-        # 5) Add contribution of ZCB to guarentee
-        N += c_R/zcb_prices[t]
+
+        # 5) Update active and reserve with contributions
+        eta_A += c_A / A
+        eta_R += c_R / R
+        
+        # Keep N == eta_R so floor follows reserve and doesn’t “run away”
+        N = eta_R
+
+        # 6) Post-update diagnostics
+        MV_A = eta_A * A
+        MV_R = eta_R * R
+        W = MV_A + MV_R
+        F = N * R
+        L = W / F
 
         # Save
         rows.append({
-        "month": 0,
-        "A": A,
-        "MV_A": MV_A,
-        "MV_R": MV_R,
-        "W": W,
-        "Floor": F,
-        "Cushion": cushion,
-        "N": N,
-        "P": zcb_prices[t],
-        "C": contributions[t],
-        "c_A": c_A*contributions[t], 
-        "c_R": c_R*contributions[t],
-        "L": W/F,
-        "tie_in": False,
-    })
+            "month": t,
+            "A": A,
+            "MV_A": MV_A,
+            "MV_R": MV_R,
+            "W": W,
+            "Floor": F,
+            "Cushion": max(W - F, 0.0),
+            "N": N,
+            "P": R,
+            "C": C,
+            "c_A": c_A,
+            "c_R": c_R,
+            "L": L,
+            "tie_in": tie_in,
+        })
 
-    history = pd.DataFrame(rows, columns=['month','MV_A','MV_R', "c_A", "c_R",'N','P','W','L','tie_in'])
+    history = pd.DataFrame(rows, columns=[
+        'month', 'A', 'MV_A', 'MV_R', 'c_A', 'c_R', 'N', 'P', 'W', 'Floor', 'L', 'tie_in'
+    ])
     return history
 
 
@@ -179,7 +173,7 @@ zcb_data = pd.read_csv('csv_files/yield_curve_data.csv', parse_dates=['TIME_PERI
 # --- Set parameters ---
 T = 120
 years = 10
-contributions = np.zeros(T+1) + 100
+contributions = np.zeros(T+1) + 100.0
 
 allow_short = False
 portfolio_strategy = "markowitz"  # "markowitz" or "risk_parity"

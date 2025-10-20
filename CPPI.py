@@ -155,6 +155,13 @@ def CPPI(
 EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
 US_data = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 
+columns_to_add = list(EU_data.columns[2:36])
+
+# Add the risk free rate to the portfolios such that they are no longer excess returns
+
+EU_data[columns_to_add] = EU_data[columns_to_add].add(EU_data['RF'], axis=0)
+US_data[columns_to_add] = US_data[columns_to_add].add(US_data['RF'], axis=0)
+
 # Modify data for use in markowitz
 
 portfolios = list(EU_data.columns[5:36])
@@ -255,3 +262,15 @@ print("Average Return: ", np.mean(Return_120))
 print("Average number of tie-ins: ", np.mean(num_tie_in))
 print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_guarantee))
 print(sum(contributions))
+
+
+Floor = summary['Floor']
+Wealth = summary['W']
+
+plt.plot(summary['month'], summary['W'], label='Wealth', color = 'red')
+plt.plot(summary['month'], summary['Floor'], label='Floor', color = 'blue')
+plt.xlabel('Month')
+plt.ylabel('Amount')
+plt.title('CPPI Wealth and Floor over Time')
+plt.legend()
+plt.show()

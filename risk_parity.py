@@ -271,7 +271,7 @@ def risk_parity(csv1, csv2, market1, market2, include_market2, window,
     strat_returns = apply_weights_to_next_month_returns(W_scaled, R, window)
     view_return = pd.DataFrame({"Date": aligned_dates_return, "return": strat_returns})
 
-    return view_weight, view_std, view_return
+    return view_return
 
 
 
@@ -279,12 +279,12 @@ def risk_parity(csv1, csv2, market1, market2, include_market2, window,
 #The max short is when the market rate is fully invested so it equals 1. if less then one and shorting is allowed the rest is invested in risk free rate.
 #The target std is hit by using the std matrix computed from the rolling std function. The target std represents the portfolios desired risk level, and not the markets risk level.
 # Example usage:
-weights, std, returns = risk_parity(df_EU, df_USEUR, "EU", "US", True, 36,
-                                          True, True, True,
-                                          True, True, True,
-                                          use_covariance=False, allow_short=True, target_std=3)
-# everything in percentages not decimals
-print(weights.head())
-print(std.head())
-print(returns.head())
-print(np.mean(returns['return']))
+# weights, std, returns = risk_parity(df_EU, df_USEUR, "EU", "US", True, 36,
+#                                           True, True, True,
+#                                           True, True, True,
+#                                           use_covariance=False, allow_short=True, target_std=3)
+# # everything in percentages not decimals
+# print(weights.head())
+# print(std.head())
+# print(returns.head())
+# print(np.mean(returns['return']))

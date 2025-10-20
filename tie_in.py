@@ -145,6 +145,14 @@ if allow_short:
     EU_data = pd.read_csv("csv_files/EXPORT EU EUR.csv")
     US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
 
+
+columns_to_add = list(EU_data.columns[2:36])
+
+# Add the risk free rate to the portfolios such that they are no longer excess returns
+
+EU_data[columns_to_add] = EU_data[columns_to_add].add(EU_data['RF'], axis=0)
+US_data[columns_to_add] = US_data[columns_to_add].add(US_data['RF'], axis=0)
+
 ## Markowitz
 n_points = 10
 strategy = "tangent"

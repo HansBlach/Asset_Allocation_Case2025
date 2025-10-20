@@ -15,10 +15,10 @@ from markowitz import markowitz_historical
 class CPPIParams:
     m: float = 1             # CPPI multiplier (>=1)
     b: float = 1.0           # max leverage ratio (keep at 1.0 for "no leverage")
-    W0: float = 100.0        # initial wealth
-    F0: float = 80.0         # initial floor in currency (e.g., 80 for 80/20 split)
+    W0: float = 100        # initial wealth
+    F0: float = 80         # initial floor in currency (e.g., 80 for 80/20 split)
     F_target: float = 1.25   # target funded ratio
-    F_trigger: float = 1.30  # trigger funded ratio for tie-in
+    F_trigger: float = 1.3  # trigger funded ratio for tie-in
 
 
 def CPPI(
@@ -45,6 +45,7 @@ def CPPI(
     W0 = cppip.W0
     F0 = cppip.F0
 
+
     # Starting values for price processes
     R = zcb_prices[0]                                  
     A = 1     
@@ -53,11 +54,13 @@ def CPPI(
     
     # Initial allocation proportions
     eta_A = E0 / A                               # units of active
-    eta_R = (W0 - E0)/R             # units of ZCB
+    eta_R = (W0 - E0)/R                          # units of ZCB
 
     # Initial guarantee units N0 from floor and current ZCB price
-    N = F0/ R
-    F = N * R                          
+    N = F0 / R
+    F = N * R
+
+    Floor_ratio = W0/F0                          
 
     # ---- Store results ----
 
@@ -87,24 +90,18 @@ def CPPI(
         # Evolve holdings to new market values before contributions
         W_pre = eta_A * A + eta_R * R
         F_pre = N * R
-        cushion = max(W_pre - F_pre, 0)
+
+        cushion_pre = max(W_pre - F_pre, 0)
 
         # Exposure
-        E = min(m * cushion, b * W_pre)
+        E_pre = min(m * cushion_pre, b * W_pre)
 
-        eta_A = E / A
-        eta_R = (W_pre - E) / R
+        eta_A_pre = E_pre / A
+        eta_R_pre = (W_pre - E_pre) / R
 
         # funded ratio before contributions for tie-in logic
         L_pre = (W_pre / F_pre)
-        tie_in = (L_pre > cppip.F_trigger)
-        if tie_in:
-            # enforce target funded ratio by lifting the floor (i.e., moving more into reserve)
-            # W_pre / (F_target) = reserve after tie-in
-            MV_R_target = W_pre / cppip.F_target
-            eta_R = MV_R_target / R
-            eta_A = (W_pre - MV_R_target) / A
-        
+
         # HER SKAL VI ALTSÅ LIGE OVERVEJE MICHAELS MAIL:
         # FLOOR ÆNDRER SIG EFTER AKTIVER, MEN VI INDBETALER EFTER TARGTET????
         C = contributions[t]        
@@ -112,9 +109,9 @@ def CPPI(
         c_A = C - c_R
 
         # 5) Update active and reserve with contributions
-        eta_A += c_A / A
-        eta_R += c_R / R
-        
+        eta_A = eta_A_pre + c_A / A
+        eta_R = eta_R_pre + c_R / R
+
         # Keep N == eta_R so floor follows reserve and doesn’t “run away”
         N = eta_R
 
@@ -122,8 +119,23 @@ def CPPI(
         MV_A = eta_A * A
         MV_R = eta_R * R
         W = MV_A + MV_R
+
         F = N * R
-        L = W / F
+        L = W / F         # Floor ratio
+
+
+        tie_in = (L > cppip.F_trigger)
+
+        if tie_in:
+            # enforce target funded ratio by lifting the floor (i.e., moving more into reserve)
+            # W_pre / (F_target) = reserve after tie-in
+            MV_R_target = W / cppip.F_target
+            eta_R = MV_R_target / R
+            eta_A = (W - MV_R_target) / A
+            N = eta_R
+        
+        
+
 
         # Save
         rows.append({
@@ -139,12 +151,13 @@ def CPPI(
             "C": C,
             "c_A": c_A,
             "c_R": c_R,
+            "L pre": L_pre,
             "L": L,
             "tie_in": tie_in,
         })
 
     history = pd.DataFrame(rows, columns=[
-        'month', 'A', 'MV_A', 'MV_R', 'c_A', 'c_R', 'N', 'P', 'W', 'Floor', 'L', 'tie_in'
+        'month', 'A', 'MV_A', 'MV_R', 'c_A', 'c_R', 'N', 'P', 'W', 'Floor', 'L pre', 'L', 'tie_in'
     ])
     return history
 
@@ -154,6 +167,13 @@ def CPPI(
 # GENBRUGT FRA TIE-IN.PY
 EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
 US_data = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
+
+columns_to_add = list(EU_data.columns[2:36])
+
+# Add the risk free rate to the portfolios such that they are no longer excess returns
+
+EU_data[columns_to_add] = EU_data[columns_to_add].add(EU_data['RF'], axis=0)
+US_data[columns_to_add] = US_data[columns_to_add].add(US_data['RF'], axis=0)
 
 # Modify data for use in markowitz
 
@@ -227,7 +247,11 @@ for i in range(len(active_returns_full)-120):
     
     zcb_prices = zcb_price_generator(years, T + 1, start = i, data = zcb_data)
     active_returns = active_returns_full[i:i+T]
-    # active_returns = np.zeros(T) + 0.10  # Comment out or remove this line to use actual strategy returns
+    # if i == 25:
+    #     active_returns = np.random.normal(loc= 0 , scale= 0.02, size=T)
+    
+    # if i == 30:
+    #     active_returns = np.random.normal(loc= -0.03 , scale= 0.02, size=T)
 
     # Sanity checks
     assert active_returns.shape == (T,)
@@ -235,7 +259,7 @@ for i in range(len(active_returns_full)-120):
 
     summary = CPPI(active_returns, zcb_prices, contributions)
 
-    summary_120 = summary.iloc[120,:]
+    summary_120 = summary.iloc[T,:]
 
     # Add observations to results:
     MVA_120.append(summary_120['MV_A'])
@@ -255,3 +279,35 @@ print("Average Return: ", np.mean(Return_120))
 print("Average number of tie-ins: ", np.mean(num_tie_in))
 print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_guarantee))
 print(sum(contributions))
+
+class CPPIParams:
+    m: float = 1             # CPPI multiplier (>=1)
+    b: float = 1.0           # max leverage ratio (keep at 1.0 for "no leverage")
+    W0: float = 100.0        # initial wealth
+    F0: float = 80.0         # initial floor in currency (e.g., 80 for 80/20 split)
+    F_target: float = 1.25     # target funded ratio
+    F_trigger: float = 1.3  # trigger funded ratio for tie-in
+
+
+# active_returns = active_returns = active_returns_full[0:T]
+
+# zcb_prices = zcb_price_generator(years, T + 1, start = 0, data = zcb_data)
+
+# contributions = np.zeros(T+1) + 100
+
+# summary_print = CPPI(active_returns, zcb_prices, contributions, CPPIParams)
+
+
+
+# Floor = summary_print['Floor']
+# Wealth = summary_print['W']
+
+# print(summary_print)
+
+# plt.plot(summary_print['month'], Wealth, label='Wealth', color = 'red')
+# plt.plot(summary_print['month'], Floor, label='Floor', color = 'blue')
+# plt.xlabel('Month')
+# plt.ylabel('Amount')
+# plt.title('CPPI Wealth and Floor over Time')
+# plt.legend()
+# plt.show()

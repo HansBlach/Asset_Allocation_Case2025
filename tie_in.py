@@ -272,8 +272,8 @@ def evaluate_params(Ltr: float, Ltgt: float) -> dict:
     )
 
 # 2) Define a grid (feel free to tweak)
-triggers = np.round(np.arange(1.15, 1.51, 0.05), 2)
-deltas   = np.round(np.arange(0.02, 0.11, 0.02), 2)  # delta = L_trigger - L_target
+triggers = np.round(np.arange(1.10, 2.05, 0.1), 2)
+deltas   = np.round(np.arange(0.02, 0.23, 0.04), 2)  # delta = L_trigger - L_target
 
 records = []
 for Ltr in triggers:
@@ -293,28 +293,54 @@ pivot_ret = grid_df.pivot(index="L_target", columns="L_trigger", values="avg_ret
 pivot_ti  = grid_df.pivot(index="L_target", columns="L_trigger", values="avg_tieins").sort_index(ascending=False)
 pivot_ps  = grid_df.pivot(index="L_target", columns="L_trigger", values="p_shortfall").sort_index(ascending=False)
 
-def show_heatmap(pivot, title, fmt="{:.2%}"):
-    fig, ax = plt.subplots(figsize=(8,5))
-    im = ax.imshow(pivot.values, aspect="auto")
+def show_heatmap(pivot, title, fmt="{:.2%}", good_is_high=True, tick_step=2):
+    """
+    good_is_high=True  -> higher values are better, use RdYlGn
+    good_is_high=False -> lower values are better, use RdYlGn_r
+    tick_step: show every Nth y tick to reduce clutter
+    """
+    cmap = "RdYlGn" if good_is_high else "RdYlGn_r"
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    im = ax.imshow(pivot.values, aspect="auto", cmap=cmap)
+
     ax.set_title(title)
     ax.set_xlabel("L_trigger")
     ax.set_ylabel("L_target")
-    ax.set_xticks(range(pivot.shape[1])); ax.set_xticklabels([f"{c:.2f}" for c in pivot.columns], rotation=45)
-    ax.set_yticks(range(pivot.shape[0])); ax.set_yticklabels([f"{r:.2f}" for r in pivot.index])
+
+    # x ticks (keep them all, but you can thin them too if needed)
+    ax.set_xticks(range(pivot.shape[1]))
+    ax.set_xticklabels([f"{c:.2f}" for c in pivot.columns], rotation=45, ha="right")
+
+    # y ticks: thin them and bump font size for readability
+    y_idx = np.arange(pivot.shape[0])
+    y_idx = y_idx[::tick_step] if tick_step > 1 else y_idx
+    ax.set_yticks(y_idx)
+    ax.set_yticklabels([f"{pivot.index[i]:.2f}" for i in y_idx], fontsize=10)
+
     # annotate cells
+    vals = pivot.values
+    # choose annotation color based on luminance so text stays readable
+    vmin, vmax = np.nanmin(vals), np.nanmax(vals)
     for i in range(pivot.shape[0]):
         for j in range(pivot.shape[1]):
-            val = pivot.values[i, j]
+            val = vals[i, j]
             if np.isfinite(val):
-                ax.text(j, i, fmt.format(val) if "return" in title.lower() or "shortfall" in title.lower() else f"{val:.1f}",
-                        ha="center", va="center", fontsize=8, color="white")
+                # normalized brightness: 0 (dark) .. 1 (bright)
+                norm = (val - vmin) / (vmax - vmin + 1e-12)
+                text_color = "black" if norm > 0.5 else "white"
+                ax.text(j, i,
+                        (fmt.format(val) if ("return" in title.lower() or "shortfall" in title.lower())
+                         else f"{val:.1f}"),
+                        ha="center", va="center", fontsize=8, color=text_color)
+
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     plt.tight_layout()
     plt.show()
 
-show_heatmap(pivot_ret, "Avg terminal return")
-show_heatmap(pivot_ti,  "Avg # tie-ins", fmt="{:.1f}")
-show_heatmap(pivot_ps,  "Probability of shortfall", fmt="{:.1%}")
+show_heatmap(pivot_ret, "Avg terminal return", fmt="{:.2%}", good_is_high=True,  tick_step=2)
+show_heatmap(pivot_ti,  "Avg # tie-ins",      fmt="{:.1f}",  good_is_high=False, tick_step=2)
+show_heatmap(pivot_ps,  "Probability of shortfall", fmt="{:.1%}", good_is_high=False, tick_step=2)
 
 
 # 4) Scatter: avg return vs avg tie-ins; color by L_trigger, marker by delta

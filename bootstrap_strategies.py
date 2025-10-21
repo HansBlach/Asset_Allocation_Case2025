@@ -8,7 +8,20 @@ from risk_parity import risk_parity
 
 from markowitz import markowitz_historical, returns_to_value
 
+# -------- Set parameters -------
+
+n_bootstrap = 100
+
+window = 36
+n_points = 10
+include_US = True
+
 allow_short = True
+
+has_MOM1, has_SMB1, has_RM_RF1 = True, False, True 
+has_MOM2, has_SMB2, has_RM_RF2 = False, False, False
+
+# ------------------------------
 
 EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
 
@@ -21,9 +34,9 @@ if allow_short:
 
 def annualizer(mean_return, type, periods_per_year = 12):
     if type == "return":
-        return (1 + mean_return/100) ** periods_per_year - 1
+        return ((1 + mean_return/100) ** periods_per_year - 1)*100
     if type == "volatility":
-        return mean_return/100 * np.sqrt(periods_per_year)
+        return (mean_return/100 * np.sqrt(periods_per_year))*100
 
 
 def block_bootstrap(df, n_bootstrap=1000, block_length=12, random_state=None):
@@ -45,13 +58,7 @@ def block_bootstrap(df, n_bootstrap=1000, block_length=12, random_state=None):
 
 # Assuming your previous setup & functions (block_bootstrap, markowitz_historical, risk_parity) are defined
 
-# -------- Set parameters -------
 
-n_bootstrap = 300
-
-window = 36
-n_points = 10
-include_US = True
 
 # --------------------------------
 
@@ -62,6 +69,10 @@ boot_US = block_bootstrap(US_data, n_bootstrap=n_bootstrap, block_length=12, ran
 mean_markowitz, std_markowitz, sharpe_markowitz = [], [], []
 mean_risk_parity, std_risk_parity, sharpe_risk_parity = [], [], []
 mean_market, std_market, sharpe_market = [], [], []
+
+annualized_mean_markowitz, annualized_std_markowitz, annualized_sharpe_markowitz = [], [], []
+annualized_mean_risk_parity, annualized_std_risk_parity, annualized_sharpe_risk_parity = [], [], []
+annualized_mean_market, annualized_std_market, annualized_sharpe_market = [], [], []
 
 
 for i in range(n_bootstrap):
@@ -80,22 +91,36 @@ for i in range(n_bootstrap):
     marko_returns = markowitz_historical(marko_data, window, n_points=n_points, allow_short= allow_short)
 
     rp_returns = risk_parity(boot_EU[i],boot_US[i], "EU", "US", window = window, include_market2 = include_US,
-                             has_MOM1 = True,has_SMB1 = True,has_RM_RF1 = True, has_MOM2 = include_US, has_SMB2 = include_US, has_RM_RF2 = include_US)['return']
+                             has_MOM1 = has_MOM1,has_SMB1 = has_SMB1,has_RM_RF1 = has_RM_RF1, has_MOM2 = has_MOM2, has_SMB2 = has_SMB2, has_RM_RF2 = has_RM_RF2)['return']
 
 
     market_returns = boot_EU[i]['RM_RF']
 
     # --- Markowitz ---
-    mean_markowitz.append(annualizer(np.mean(marko_returns), type="return"))
-    std_markowitz.append(annualizer(np.std(marko_returns), type="volatility"))
+    annualized_mean_markowitz.append(annualizer(np.mean(marko_returns), type="return"))
+    annualized_std_markowitz.append(annualizer(np.std(marko_returns), type="volatility"))
 
     # --- Risk Parity ---
-    mean_risk_parity.append(annualizer(np.mean(rp_returns), type="return"))
-    std_risk_parity.append(annualizer(np.std(rp_returns), type="volatility"))
+    annualized_mean_risk_parity.append(annualizer(np.mean(rp_returns), type="return"))
+    annualized_std_risk_parity.append(annualizer(np.std(rp_returns), type="volatility"))
 
     # --- Market ---
-    mean_market.append(annualizer(np.mean(market_returns), type="return"))
-    std_market.append(annualizer(np.std(market_returns), type="volatility"))
+    annualized_mean_market.append(annualizer(np.mean(market_returns), type="return"))
+    annualized_std_market.append(annualizer(np.std(market_returns), type="volatility"))
+
+    # Not annualized
+
+    # --- Markowitz ---
+    mean_markowitz.append(np.mean(marko_returns))
+    std_markowitz.append(np.std(marko_returns))
+
+    # --- Risk Parity ---
+    mean_risk_parity.append(np.mean(rp_returns))
+    std_risk_parity.append(np.std(rp_returns))
+
+    # --- Market ---
+    mean_market.append(np.mean(market_returns))
+    std_market.append(np.std(market_returns))
 
 
 sharpe_markowitz = np.array(mean_markowitz)/np.array(std_markowitz)
@@ -104,6 +129,10 @@ sharpe_risk_parity = np.array(mean_risk_parity)/np.array(std_risk_parity)
 
 sharpe_market = np.array(mean_market)/np.array(std_market)
 
+annualized_sharpe_markowitz = np.array(annualized_mean_markowitz)/np.array(annualized_std_markowitz)
+annualized_sharpe_risk_parity = np.array(annualized_mean_risk_parity)/np.array(annualized_std_risk_parity)
+annualized_sharpe_market = np.array(annualized_mean_market)/np.array(annualized_std_market)
+
 if allow_short:
     print("Shorting was allowed")
 
@@ -111,7 +140,7 @@ if not allow_short:
     print("Shorting was not allowed")
 
 
-# --- Summary Table ---
+# --- Summary Table not annualized ---
 summary_df = pd.DataFrame({
     "Strategy": ["Markowitz", "Risk Parity", "European Market"],
     "Mean Excess Return": [np.mean(mean_markowitz), np.mean(mean_risk_parity), np.mean(mean_market)],
@@ -124,9 +153,24 @@ summary_df["Mean Excess Return"] = summary_df["Mean Excess Return"].map("{:.6f}"
 summary_df["Standard deviation"] = summary_df["Standard deviation"].map("{:.6f}".format)
 summary_df["Sharpe Ratio"] = summary_df["Sharpe Ratio"].map("{:.3f}".format)
 
-print("\nBootstrap Portfolio Performance Summary (annualized)")
+print("\nBootstrap Portfolio Performance Summary (not annualized)")
 print(summary_df.to_string(index=False))
 
+# --- Summary Table (annualized) ---
+
+annualized_summary_df = pd.DataFrame({
+    "Strategy": ["Markowitz", "Risk Parity", "European Market"],
+    "Mean Excess Return": [np.mean(annualized_mean_markowitz), np.mean(annualized_mean_risk_parity), np.mean(annualized_mean_market)],
+    "Standard deviation": [np.mean(annualized_std_markowitz), np.mean(annualized_std_risk_parity), np.mean(annualized_std_market)],
+    "Sharpe Ratio": [np.mean(annualized_sharpe_markowitz), np.mean(annualized_sharpe_risk_parity), np.mean(annualized_sharpe_market)]
+})
+
+# --- Pretty Formatting ---
+annualized_summary_df["Mean Excess Return"] = annualized_summary_df["Mean Excess Return"].map("{:.6f}".format)
+annualized_summary_df["Standard deviation"] = annualized_summary_df["Standard deviation"].map("{:.6f}".format)
+annualized_summary_df["Sharpe Ratio"] = annualized_summary_df["Sharpe Ratio"].map("{:.3f}".format)
+print("\nBootstrap Portfolio Performance Summary (annualized)")
+print(annualized_summary_df.to_string(index=False))
 
 
 

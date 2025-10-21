@@ -26,12 +26,12 @@ def rolling_std(x: np.ndarray, window: int) -> np.ndarray:
 # -----------------------------
 # Rolling covariance (T x N x N)
 # -----------------------------
-def rolling_covariance(R: np.ndarray, window: int) -> np.ndarray:
+def rolling_covariance(R: np.ndarray, window: int, shrink = 0.1) -> np.ndarray:
     T = len(R) - window + 1
     N = R.shape[1]
     covs = np.empty((T, N, N))
     for i in range(T):
-        covs[i] = np.cov(R[i:i+window].T)
+        covs[i] = (1 - shrink) * np.cov(R[i:i+window].T) + shrink * np.eye(N)
     return covs
 
 
@@ -193,6 +193,7 @@ def risk_parity(csv1, csv2, market1, market2, include_market2, window,
         for i in market_cols:
             W[:, i] = np.minimum(W[:, i], 1.0)
         W = W / W.sum(axis=1, keepdims=True)
+        
 
     # --- Mode handling
     if not allow_short:

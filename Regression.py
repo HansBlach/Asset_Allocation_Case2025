@@ -7,6 +7,7 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 # Load the data from CSV files
 df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+print(df_EU)
 df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
 df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
 
@@ -245,6 +246,8 @@ def data_interpreter(df):
 # print("Baseline US EUR regression summary:")
 # print(R2_summary)
 
+# m_dif = compare_models_high_prior_diff_table(df_USEUR, df_long_USEUR, label1="long-short", label2="Long-only")
+# print(m_dif)
 
 # Run regression for EU EUR
 results_df_EU = run_regression(df_EU, explanatory_cols)

@@ -137,7 +137,7 @@ years = 10
 contributions = np.zeros(T+1) + 100
 
 allow_short = False
-portfolio_strategy = "risk_parity"
+portfolio_strategy = "markowitz" # "markowitz" or "risk_parity"
 market = "EU"
 window = 36
 
@@ -225,3 +225,153 @@ print("Average Return: ", np.mean(Return_120))
 print("Average number of tie-ins: ", np.mean(num_tie_in))
 print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_guarantee))
 print(sum(contributions))
+
+
+
+
+
+# --- Grid search over (L_trigger, L_target) ---
+
+# 1) A helper that runs your existing rolling-window loop for one (Ltr, Ltgt)
+def evaluate_params(Ltr: float, Ltgt: float) -> dict:
+    assert Ltgt < Ltr, "Require L_target < L_trigger"
+    # use your existing contributions, T, years, zcb_data, active_returns_full
+    MVA_120, MVR_120, W_120, Ret_120, tieins, shortfall, final_N = [], [], [], [], [], [], []
+    
+    for i in range(len(active_returns_full) - T):
+        zcb_prices = zcb_price_generator(years, T + 1, start=i, data=zcb_data)
+        active_returns = active_returns_full[i:i+T]
+
+        # pass a custom cfg with target/trigger
+        cfg = TieInConfig(L_target=Ltgt, L_trigger=Ltr, initial_wealth=0)  # adjust initial_wealth if you want
+
+        summary = simulate_tie_in_path(active_returns, zcb_prices, contributions, cfg)
+        s120 = summary.iloc[T]  # month 120
+
+        MVA_120.append(s120['MV_A'])
+        MVR_120.append(s120['MV_R'])
+        W_120.append(s120['W'])
+        Ret_120.append((s120['W'] - sum(contributions)) / sum(contributions))
+        shortfall.append(s120['W'] - sum(contributions) < 0)
+        tieins.append(int(summary['tie_in'].sum()))
+        final_N.append(float(s120['N']))
+
+    return dict(
+        L_trigger=Ltr,
+        L_target=Ltgt,
+        avg_MV_A=np.mean(MVA_120),
+        avg_MV_R=np.mean(MVR_120),
+        avg_W=np.mean(W_120),
+        avg_return=np.mean(Ret_120),
+        avg_tieins=np.mean(tieins),
+        p_shortfall=np.mean(shortfall),
+        median_final_N=np.median(final_N),
+        p10_final_N=np.percentile(final_N, 10),
+        p90_final_N=np.percentile(final_N, 90),
+        paths=len(W_120),
+    )
+
+# 2) Define a grid (feel free to tweak)
+triggers = np.round(np.arange(1.10, 2.05, 0.1), 2)
+deltas   = np.round(np.arange(0.02, 0.23, 0.04), 2)  # delta = L_trigger - L_target
+
+records = []
+for Ltr in triggers:
+    for d in deltas:
+        Ltgt = round(Ltr - d, 2)
+        if Ltgt <= 1.00 or Ltgt >= Ltr:  # feasibility
+            continue
+        rec = evaluate_params(Ltr, Ltgt)
+        records.append(rec)
+
+grid_df = pd.DataFrame(records)
+print(grid_df.head())
+
+
+# 3) Heatmap of average return across (L_trigger, L_target)
+pivot_ret = grid_df.pivot(index="L_target", columns="L_trigger", values="avg_return").sort_index(ascending=False)
+pivot_ti  = grid_df.pivot(index="L_target", columns="L_trigger", values="avg_tieins").sort_index(ascending=False)
+pivot_ps  = grid_df.pivot(index="L_target", columns="L_trigger", values="p_shortfall").sort_index(ascending=False)
+
+def show_heatmap(pivot, title, fmt="{:.2%}", good_is_high=True, tick_step=2):
+    """
+    good_is_high=True  -> higher values are better, use RdYlGn
+    good_is_high=False -> lower values are better, use RdYlGn_r
+    tick_step: show every Nth y tick to reduce clutter
+    """
+    cmap = "RdYlGn" if good_is_high else "RdYlGn_r"
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    im = ax.imshow(pivot.values, aspect="auto", cmap=cmap)
+
+    ax.set_title(title)
+    ax.set_xlabel("L_trigger")
+    ax.set_ylabel("L_target")
+
+    # x ticks (keep them all, but you can thin them too if needed)
+    ax.set_xticks(range(pivot.shape[1]))
+    ax.set_xticklabels([f"{c:.2f}" for c in pivot.columns], rotation=45, ha="right")
+
+    # y ticks: thin them and bump font size for readability
+    y_idx = np.arange(pivot.shape[0])
+    y_idx = y_idx[::tick_step] if tick_step > 1 else y_idx
+    ax.set_yticks(y_idx)
+    ax.set_yticklabels([f"{pivot.index[i]:.2f}" for i in y_idx], fontsize=10)
+
+    # annotate cells
+    vals = pivot.values
+    # choose annotation color based on luminance so text stays readable
+    vmin, vmax = np.nanmin(vals), np.nanmax(vals)
+    for i in range(pivot.shape[0]):
+        for j in range(pivot.shape[1]):
+            val = vals[i, j]
+            if np.isfinite(val):
+                # normalized brightness: 0 (dark) .. 1 (bright)
+                norm = (val - vmin) / (vmax - vmin + 1e-12)
+                text_color = "black" if norm > 0.5 else "white"
+                ax.text(j, i,
+                        (fmt.format(val) if ("return" in title.lower() or "shortfall" in title.lower())
+                         else f"{val:.1f}"),
+                        ha="center", va="center", fontsize=8, color=text_color)
+
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    plt.tight_layout()
+    plt.show()
+
+show_heatmap(pivot_ret, "Avg terminal return", fmt="{:.2%}", good_is_high=True,  tick_step=2)
+show_heatmap(pivot_ti,  "Avg # tie-ins",      fmt="{:.1f}",  good_is_high=False, tick_step=2)
+show_heatmap(pivot_ps,  "Probability of shortfall", fmt="{:.1%}", good_is_high=False, tick_step=2)
+
+
+# 4) Scatter: avg return vs avg tie-ins; color by L_trigger, marker by delta
+grid_df["delta"] = (grid_df["L_trigger"] - grid_df["L_target"]).round(2)
+
+fig, ax = plt.subplots(figsize=(7,5))
+for d in sorted(grid_df["delta"].unique()):
+    sub = grid_df[grid_df["delta"] == d]
+    sc = ax.scatter(sub["avg_tieins"], sub["avg_return"], label=f"Δ={d:.2f}", alpha=0.8)
+ax.set_xlabel("Average tie-ins per path")
+ax.set_ylabel("Average terminal return")
+ax.set_title("Return vs. tie-in activity")
+ax.legend(title="Spacing (Ltr−Ltgt)")
+plt.tight_layout(); plt.show()
+
+
+
+
+# ----------------- summarize against current settings -----------------
+baseline = evaluate_params(1.30, 1.25)  # adjust to your current
+print("Baseline:", baseline)
+
+# For the scatter, add a crosshair
+plt.figure(figsize=(7,5))
+for d in sorted(grid_df["delta"].unique()):
+    sub = grid_df[grid_df["delta"] == d]
+    plt.scatter(sub["avg_tieins"], sub["avg_return"], label=f"Δ={d:.2f}", alpha=0.8)
+plt.axvline(baseline["avg_tieins"], linestyle="--")
+plt.axhline(baseline["avg_return"], linestyle="--")
+plt.text(baseline["avg_tieins"], baseline["avg_return"], "  baseline", va="bottom")
+plt.xlabel("Average tie-ins per path"); plt.ylabel("Average terminal return")
+plt.title("Return vs. tie-in activity (with baseline)")
+plt.legend(title="Spacing (Ltr−Ltgt)")
+plt.tight_layout(); plt.show()

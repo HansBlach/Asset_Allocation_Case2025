@@ -21,7 +21,7 @@ explanatory_cols = ["RM_RF", "SMB", "MOM"]
 def run_regression(df, explanatory_cols):
     # Fra chat: Coerce to numeric where possible and drop impossible rows per portfolio ---
     # Do for all portfolios in sorted data set
-    portfolio_cols = list(df.columns[5:36])
+    portfolio_cols = list(df.columns[11:36])
     # (Factor columns must exist)
     missing = [c for c in explanatory_cols if c not in df.columns]
     if missing:
@@ -241,9 +241,9 @@ def data_interpreter(df):
     return summary_df
 
 
-R2_summary = data_interpreter(df_USEUR)
-print("Baseline US EUR regression summary:")
-print(R2_summary)
+# R2_summary = data_interpreter(df_USEUR)
+# print("Baseline US EUR regression summary:")
+# print(R2_summary)
 
 
 # Run regression for EU EUR

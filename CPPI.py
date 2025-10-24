@@ -193,7 +193,7 @@ T = 120
 years = 10
 
 allow_short = False
-portfolio_strategy = "risk_parity"  # "markowitz" or "risk_parity"
+portfolio_strategy = "markowitz"  # "markowitz" or "risk_parity"
 market = "both"
 window = 36
 
@@ -205,6 +205,9 @@ if allow_short:
 n_points = 10
 strategy = "tangent"
 mu_target = 0.01
+
+eu_factors = ["RM_RF", "MOM"]
+us_factors = ["RM_RF", "SMB", "MOM"]
 
 ## Risk parity
 if market == "both": include_market2 = True
@@ -220,10 +223,7 @@ target_std = 4
 # --- Active portfolio strategies --- 
 # Markowitz
 if portfolio_strategy == "markowitz":
-    if market == "both":
-        active_returns_full = np.array(markowitz_historical(all_assets, window, strategy, mu_target, n_points, allow_short))/100
-    if market == "EU":
-        active_returns_full = np.array(markowitz_historical(EU, window, strategy, mu_target, n_points, allow_short))/100
+    active_returns_full = np.array(markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "tangent"))/100
 
 
 # Risk Parity

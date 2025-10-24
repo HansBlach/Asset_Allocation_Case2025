@@ -133,7 +133,7 @@ cov_matrix = data.cov().to_numpy()
 
 variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points=150)
 
-frontier_plotter(variance, returns)
+# frontier_plotter(variance, returns)
 
 # We want to invest in the portfolio with the highest sharpe ratio, that is the tangent portfolio
 # but we can't use theoretical results because we have a no-shorting constraint

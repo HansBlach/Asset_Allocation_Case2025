@@ -34,7 +34,7 @@ columns_to_add = list(EU_data.columns[2:36])
 EU_data[columns_to_add] = EU_data[columns_to_add].add(EU_data['RF'], axis=0)
 US_data[columns_to_add] = US_data[columns_to_add].add(US_data['RF'], axis=0)
 
-def result_plot(EU_data, US_data, window, n_points, markowitz_short = False, name = "", data = "both", baseline_market = "EU", has_MOM1=True,has_MOM2=True,has_SMB1=True,has_SMB2=True,has_RM_RF1=True,has_RM_RF2=True):
+def result_plot(EU_data, US_data, window, n_points, eu_factors, us_factors, markowitz_short = False, name = "", data = "both", baseline_market = "EU", has_MOM1=True,has_MOM2=True,has_SMB1=True,has_SMB2=True,has_RM_RF1=True,has_RM_RF2=True):
     if data == "both":
         include_market2 = True
     if data == "EU" or data == "US":
@@ -43,26 +43,22 @@ def result_plot(EU_data, US_data, window, n_points, markowitz_short = False, nam
     # Convert date columns - handle the YYYYMM integer format properly
     EU_data['Date'] = pd.to_datetime(EU_data['Date'], format='%Y%m')
     US_data['Date'] = pd.to_datetime(US_data['Date'], format='%Y%m')
-
-    # Make data such that it fits with markowitz functions
-    if data == "both":
-        markowitz_data = data_prep(EU_data, US_data)
-    if data == "EU":
-        markowitz_data = EU_data[list(EU_data.columns[5:36])]
-    if data == "US":
-        markowitz_data = US_data[list(US_data.columns[5:36])]
     
     # Use markowitz function to get markowitz return and value development of tangent strategy
-    markowitz_returns = markowitz_historical(markowitz_data, window, n_points = n_points, allow_short=markowitz_short)
-    markowitz_value = returns_to_value(markowitz_returns)
+    markowitz_returns_tan = markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "tangent", n_points = n_points, allow_short=markowitz_short)
+    markowitz_value_tan = returns_to_value(markowitz_returns_tan)
 
-    # Use risk parity funciton to get risk parity return and value development
+    # Use markowitz function to get markowitz return and value development of min_var strategy
+    # markowitz_returns_minvar = markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "min_variance", n_points = n_points, allow_short=markowitz_short)
+    # markowitz_value_minvar = returns_to_value(markowitz_returns_minvar)
+
+    # # Use markowitz function to get markowitz return and value development of max_return strategy
+    # markowitz_returns_max = markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "max_return", n_points = n_points, allow_short=markowitz_short)
+    # markowitz_value_max = returns_to_value(markowitz_returns_max)
+
+    # Use risk parity function to get risk parity return and value development
     risk_parity_returns = np.array(risk_parity(EU_data,US_data,"EU","US",include_market2 , 36, has_MOM1, has_SMB1, has_RM_RF1, has_MOM2, has_SMB2, has_RM_RF2, use_covariance= True)['return'])
     risk_parity_value = returns_to_value(risk_parity_returns)
-
-    # # Use markowitz function to get markowitz return of strategy with mu_target = average return from risk parity
-    # markowitz_returns_fixed = markowitz_historical(markowitz_data, window, strategy = "fixed", mu_target= np.mean(risk_parity_returns))
-    # markowitz_value_fixed = returns_to_value(markowitz_returns_fixed)
 
     # Take market returns and make value development
     if baseline_market == "EU":
@@ -75,30 +71,26 @@ def result_plot(EU_data, US_data, window, n_points, markowitz_short = False, nam
     # Plot the value development of the strategies
 
     plt.figure(figsize=(10, 6))
-    plt.plot(EU_data['Date'][-len(markowitz_value):], markowitz_value, label='Markowitz Tangent Strategy')
+    plt.plot(EU_data['Date'][-len(markowitz_value_tan):], markowitz_value_tan, label='Tangent Strategy')
+    # plt.plot(EU_data['Date'][-len(markowitz_value_minvar):], markowitz_value_minvar, label='Min Variance Strategy')
+    # plt.plot(EU_data['Date'][-len(markowitz_value_max):], markowitz_value_max, label='Max Return Strategy')
     plt.plot(EU_data['Date'][-len(risk_parity_value):], risk_parity_value, label='Risk Parity Strategy')
-    # plt.plot(data['Date'][-len(markowitz_value_fixed):], markowitz_value_fixed, label='Markowitz Fixed Strategy')
     plt.plot(EU_data['Date'][-len(market_value):], market_value, label='Market', linestyle='--', color='black')
     plt.xlabel('Time (Months)')
     plt.ylabel('Portfolio Value')
     plt.title(f'Value Development of Strategies: {name}')
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend()
-    plt.savefig(f"result_plot_{name}.png")
+    plt.savefig(f"result_plot_{name}.png", dpi = 300)
     #plt.show()
-
-    return markowitz_returns, risk_parity_returns, market_returns
+    return markowitz_returns_tan, risk_parity_returns, market_returns
+    #return markowitz_returns_tan, markowitz_returns_max, markowitz_returns_minvar, market_returns
     
 
-window = 36
 
-n_points = 10
 
 EU_data = pd.read_csv("csv_files/EXPORT EU EUR.csv")
 US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
-
-EU_data_long = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
-US_data_long = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 
 def annualizer(mean_return, type, periods_per_year = 12):
     if type == "return":
@@ -106,27 +98,53 @@ def annualizer(mean_return, type, periods_per_year = 12):
     if type == "volatility":
         return mean_return/100 * np.sqrt(periods_per_year)
 
-def summarize_strategies(markowitz_returns, risk_parity_returns, market_returns):    
-    strategies = {
-        "Markowitz": markowitz_returns,
-        "Risk Parity": risk_parity_returns,
-        "Market": market_returns
-    }
-    
-    data = []
-    for name, returns in strategies.items():
-        mean = annualizer(np.mean(returns), "return")
-        std = annualizer(np.std(returns), "volatility")
-        sharpe = mean / std 
-        data.append([mean, std, sharpe])
-    
-    summary = pd.DataFrame(data, columns=["Mean", "Std", "Sharpe"], index=strategies.keys())
-    return summary
+
 
 # ---- Run the code ---- 
+long_only = True
 
-markowitz_returns, risk_parity_returns, market_returns = result_plot(EU_data_long, US_data_long, window, n_points, markowitz_short= False, data = "both", baseline_market= "EU", name = "EU Tech, US Tech and Small Cap", has_SMB1= False, has_RM_RF1= False, has_RM_RF2= False, has_MOM2= True, has_SMB2=True)
+window = 36
+
+n_points = 50
+
+if long_only:
+    EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
+    US_data = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
+
+has_MOM1, has_SMB1, has_RM_RF1 = True, False, True
+has_MOM2, has_SMB2, has_RM_RF2 = True, True, True
+
+eu_factors, us_factors = ["RM_RF", "MOM"], ["RM_RF", "MOM", "SMB"]
+
+markowitz_returns_tan, risk_parity_returns, market_returns = result_plot(name = "Markowitz vs Risk Parity", EU_data = EU_data, US_data = US_data, eu_factors = eu_factors, us_factors = us_factors, n_points = n_points, window = window, markowitz_short= False, data = "both", baseline_market= "EU", has_SMB1=has_SMB1, has_SMB2=has_SMB2, has_MOM1=has_MOM1, has_MOM2=has_MOM2, has_RM_RF1=has_RM_RF1, has_RM_RF2=has_RM_RF2)
+
+#markowitz_returns_tan, markowitz_returns_max, markowitz_returns_minvar, market_returns = result_plot(name = "Markowitz strategy comparison", EU_data = EU_data, US_data = US_data, eu_factors = eu_factors, us_factors = us_factors, n_points = n_points, window = window, markowitz_short= False, data = "both", baseline_market= "EU", has_SMB1=has_SMB1, has_SMB2=has_SMB2, has_MOM1=has_MOM1, has_MOM2=has_MOM2, has_RM_RF1=has_RM_RF1, has_RM_RF2=has_RM_RF2)
 
 
-summary_table = summarize_strategies(markowitz_returns, risk_parity_returns, market_returns)
-print(summary_table)
+# --- Summary statistics ---
+
+strategies = {
+    "Tangent": markowitz_returns_tan,
+    "Risk Parity": risk_parity_returns,
+    "Market": market_returns
+}
+
+# strategies = {
+#     "Tangent": markowitz_returns_tan,
+#     "Max Return": markowitz_returns_max,
+#     "Min Variance": markowitz_returns_minvar,
+#     "Market": market_returns
+# }
+
+
+
+
+data = []
+for name, returns in strategies.items():
+    mean = annualizer(np.mean(returns), "return")
+    std = annualizer(np.std(returns), "volatility")
+    sharpe = mean / std 
+    data.append([mean, std, sharpe])
+
+summary = pd.DataFrame(data, columns=["Mean", "Std", "Sharpe"], index=strategies.keys())
+print(summary)

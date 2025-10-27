@@ -51,7 +51,7 @@ def run_regression(df, explanatory_cols):
         # Create and fit the model and t-statistic
        # === Use statsmodels so we get standard errors and t-stats ===
         X_const = sm.add_constant(X)                     # adds intercept term 'const'
-        ols_res = sm.OLS(y, X_const).fit()               # OLS fit
+        ols_res = sm.OLS(y, X_const).fit(cov_type="HAC", cov_kwds={"maxlags":12})
 
         # Map names for clarity
         a      = ols_res.params.get("const", np.nan)
@@ -80,7 +80,7 @@ def run_regression(df, explanatory_cols):
             "t(s)": t_s,
             "m": m,
             "t(m)": t_m,
-            "R2": ols_res.rsquared,
+            "R2": ols_res.rsquared_adj,
             #"MSE": np.sqrt((y-y_pred)^2), KOM EVT. TILBAGE TIL FEJLEN
         })
 
@@ -242,9 +242,9 @@ def data_interpreter(df):
     return summary_df
 
 
-# R2_summary = data_interpreter(df_USEUR)
-# print("Baseline US EUR regression summary:")
-# print(R2_summary)
+R2_summary = data_interpreter(df_EU)
+print("Baseline EU EUR regression summary:")
+print(R2_summary)
 
 # m_dif = compare_models_high_prior_diff_table(df_USEUR, df_long_USEUR, label1="long-short", label2="Long-only")
 # print(m_dif)

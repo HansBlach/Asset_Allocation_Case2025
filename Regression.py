@@ -140,7 +140,6 @@ def data_interpreter(df):
 
     explanatory_cols_MOM = ["RM_RF", "SMB"]
     res_MOM = run_regression(df, explanatory_cols_MOM)
-    print(res_MOM)
     m_R2_MOM = np.mean(res_MOM["R2"])
     explanatory_power_loss_MOM= m_R2 - np.mean(res_MOM["R2"])
     R2_5_worst_MOM = res_MOM["R2"].nsmallest(5)

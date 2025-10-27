@@ -17,7 +17,7 @@ class CPPIParams:
     b: float = 1.0           # max leverage ratio (keep at 1.0 for "no leverage")
     W0: float = 100        # initial wealth
     L_target: float = 1.25   # target funded ratio
-    L_trigger: float = 1.3  # trigger funded ratio for tie-in
+    L_trigger: float = 1.5  # trigger funded ratio for tie-in
     F0: float = 80 # (W0 / L_target)         # initial floor in currency (e.g., 80 for 80/20 split)
 
 
@@ -55,10 +55,11 @@ def CPPI(
     # Initial allocation proportions
     eta_A = E0 / A                               # units of active
     eta_R = (W0 - E0)/R                          # units of ZCB
+    F = F0
 
     # Initial guarantee units N0 from floor and current ZCB price
-    N = F0 / R
-    # F = N * R
+    # N = F0 * R
+    # F = F0
 
     # Floor_ratio = W0/F0                          
 
@@ -73,11 +74,11 @@ def CPPI(
         "W": eta_A*A + eta_R*R,
         "Floor": F0,
         "Cushion": cushion,
-        "Guarantee": N,
+        "Guarantee": F0 * R,
         "P": R,
         "E": E0,
         "L": (eta_A * A + eta_R * R) / F0,           # Her genbruger vi konceptet med funded ratio
-        "tie_in": False,                            # Vi kalder den tie-in hvis vi ændrer floor
+        "tie_in": False,                             # Vi kalder den tie-in hvis vi ændrer floor
     })
 
     # ---- Iterate months 1 to T ----
@@ -85,7 +86,7 @@ def CPPI(
         # New market values
         A = (1+ active_returns[t-1]) * A
         R = zcb_prices[t]
-        F = N * R
+        # F = F * R
         # Evolve holdings to new market values before contributions
         # W_pre = eta_A * A + eta_R * R
         # L_pre = N * R
@@ -109,6 +110,7 @@ def CPPI(
 
         # 5) Update active and reserve with contributions
         W = eta_A * A + eta_R * R
+        F = F * zcb_prices[t] / zcb_prices[t-1]
         cushion = max(W - F, 0)
         E = max(0.0, min(m * cushion, b * W))
         eta_A = E / A
@@ -122,7 +124,6 @@ def CPPI(
         MV_R = eta_R * R
         W = MV_A + MV_R
 
-        F = N * R
         L = W / F         # Floor ratio
 
 
@@ -131,12 +132,18 @@ def CPPI(
         if tie_in:
             # enforce target funded ratio by lifting the floor (i.e., moving more into reserve)
             # W_pre / (L_target) = reserve after tie-in
-            MV_R_target = W / cppip.L_target
-            eta_R = MV_R_target / R
-            eta_A = (W - MV_R_target) / A
-            N = eta_R
-        
-        
+            # MV_R_target = W / cppip.L_target
+            # eta_R = MV_R_target / R
+            # eta_A = (W - MV_R_target) / A
+            # N = eta_R
+            F = W / cppip.L_target
+            L = cppip.L_target
+            cushion = max(W - F, 0)
+            E = max(0.0, min(m * cushion, b * W))
+            eta_A = E / A
+            eta_R = (W - E) / R
+            MV_A = eta_A * A
+            MV_R = eta_R * R
 
 
         # Save ------ HAR SLETTET CONTRIBUTIONS OG L_PRE FRA OUTPUT
@@ -148,7 +155,7 @@ def CPPI(
             "W": W,
             "Floor": F,
             "Cushion": max(W - F, 0.0),
-            "Guarantee": N,
+            "Guarantee":F * R,
             "P": R,
             "E": E,
             "L": L,

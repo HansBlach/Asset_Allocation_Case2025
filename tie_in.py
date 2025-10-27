@@ -55,79 +55,104 @@ class PathResult:
 # Simulate a single path of the tie-in strategy
 # Important to note cfg is not needed
 def simulate_tie_in_path(
-    active_returns: np.ndarray,       # has dimension (T) (monthly discrete returns of Active)
-    zcb_prices: np.ndarray,           # starts at 0 so has dimension (T+1) (rolling ZCB prices, including month 0 and maturity)
-    contributions: np.ndarray = None, # has dimension (T) (monthly contributions, if any) - VÆR OPMÆRKSOM PÅ INITIAL WEALTH ER 100 SÅ C0 ER 0.
-    cfg: TieInConfig | None = None,   # if we want to change parameters in TieInFonfig we can: simulate_tie_in_path(active, zcb, TieInConfig(L_target=1.20))
+    active_returns: np.ndarray,       # (T,) monthly discrete returns of the active portfolio
+    zcb_prices: np.ndarray,           # (T+1,) rolling ZCB prices incl. month 0 and maturity
+    contributions: np.ndarray = None, # (T+1,) monthly contributions, first element is initial deposit
+    cfg: TieInConfig | None = None,   # tie-in configuration (targets, trigger, etc.)
 ) -> pd.DataFrame:
     if cfg is None:
         cfg = TieInConfig()
-    
+
     T = len(active_returns)
     assert len(zcb_prices) == T + 1, "zcb_prices must have length T+1 (including month 0 and maturity)."
 
     if contributions is None:
-        contributions = np.zeros(T + 1, dtype=float)
+        contributions = np.zeros(T + 1)
     contributions = np.asarray(contributions, dtype=float)
     assert len(contributions) == T + 1, "contributions must have length T+1 (including month 0)."
 
-    W0 = cfg.initial_wealth + contributions[0]            # We can both set initial wealt and contributions
-    MV_R = W0 / cfg.L_target                              # start exactly at target funded ratio
-    MV_A = W0 - MV_R                                      # Rest in active
-    N = MV_R / zcb_prices[0]                              # initial face (units of the ZCB)
+    # --- Initial setup ---
+    W0 = cfg.initial_wealth + contributions[0]
+    MV_R = W0 / cfg.L_target        # reserve value so L = L_target initially
+    MV_A = W0 - MV_R
+    N = MV_R / zcb_prices[0]        # face value of the ZCB (guarantee units)
 
-    rows = []
-    rows.append({
+    rows = [{
         "month": 0,
         "MV_A": MV_A,
         "MV_R": MV_R,
         "N": N,
         "P": zcb_prices[0],
-        "W": MV_A + MV_R,
+        "W": W0,
         "C": contributions[0],
-        "c_A": contributions[0]*MV_A/W0, 
-        "c_R": contributions[0]*MV_R/W0,
-        "L": (MV_A + MV_R) / MV_R,
+        "c_A": contributions[0] * MV_A / W0,
+        "c_R": contributions[0] * MV_R / W0,
+        "L": W0 / MV_R,
         "tie_in": False,
-    })
-    
-    # Do the calculations month by month
-    for i in range(1, T+1):
-        # 1) Active evolves                                     - VI SKAL OGSÅ LIGE VÆRE OPMÆRKSOMME PÅ HVORDAN ACTIVE RETURNS ER GIVET I VALGT STRATEGI
-        MV_A = MV_A * (1.0 + active_returns[i-1])              #- HVIS ACTIVE RETURNS ER AGGREGEREDE SKAL DET VÆRE SÅDAN, ELLERS SKAL ÆNDRES
+        "transfer_to_reserve": 0.0,
+    }]
+
+    # --- Monthly simulation loop ---
+    for i in range(1, T + 1):
+        # 1) Active portfolio evolves
+        MV_A *= (1.0 + active_returns[i - 1])
+
         # 2) Reserve repriced from rolling ZCB
         P_i = zcb_prices[i]
         MV_R = N * P_i
-        # Total wealth
         W = MV_A + MV_R
 
-        # Calculate funded ratio
-        L = (MV_A + MV_R) / MV_R
+        # 3) Compute funded ratio and check trigger
+        L = W / MV_R
         tie_in = L > cfg.L_trigger
-        
-        # Make relevant adjustments if the funded ratio exceeds the trigger level
+        transfer = 0.0
+
+        # 4) If tie-in: lock in gains by raising guarantee and rebalancing
         if tie_in:
-            # Reset to target: W = L_target * N_new * P_i
-            N_new = W / (cfg.L_target * P_i)       # new face (units of the ZCB)
-            # new reserve and active
-            MV_R = N_new * P_i
-            MV_A = W - MV_R
-        
-        # Calculate contributions based on the value of active/reserve portfolio
-        C = contributions[i]        
-        c_R = C * MV_R / (W)
-        c_A = C * MV_A / (W)
-        # 4) Update active and reserve with contributions
+            MV_R_old = MV_R
+
+            # target reserve value to restore funded ratio to L_target
+            MV_R_target = W / cfg.L_target
+            transfer = MV_R_target - MV_R
+
+            # ensure we only transfer positive amount
+            if transfer > 0:
+                N_added = transfer / P_i
+                N += N_added
+                MV_R = N * P_i          # new reserve market value
+                MV_A = W - MV_R         # reduce active by same amount
+
+        # 5) Apply new contributions
+        C = contributions[i]
+        if W > 0:
+            c_R = C * MV_R / W
+            c_A = C * MV_A / W
+        else:
+            c_R = c_A = 0.0
         MV_R += c_R
         MV_A += c_A
-        # 5) Add contribution of ZCB to guarentee
-        N += c_R/P_i
-            
+        N += c_R / P_i                         # contributions increase ZCB face value
 
-        rows.append(dict(month=i, MV_A=MV_A, MV_R=MV_R, c_A = c_A, c_R = c_R, N=N, P=P_i, W=MV_A+MV_R, L=(MV_A+MV_R)/MV_R, tie_in=tie_in))
+        # Record month
+        rows.append({
+            "month": i,
+            "MV_A": MV_A,
+            "MV_R": MV_R,
+            "c_A": c_A,
+            "c_R": c_R,
+            "N": N,
+            "P": P_i,
+            "W": MV_A + MV_R,
+            "L": (MV_A + MV_R) / MV_R,
+            "tie_in": tie_in,
+            "transfer_to_reserve": transfer,
+        })
 
-    history = pd.DataFrame(rows, columns=['month','MV_A','MV_R', "c_A", "c_R",'N','P','W','L','tie_in'])
-    return history
+    # --- Output history ---
+    cols = ["month", "MV_A", "MV_R", "c_A", "c_R", "N", "P",
+            "W", "L", "tie_in", "transfer_to_reserve"]
+    return pd.DataFrame(rows, columns=cols)
+
 
 
 
@@ -137,27 +162,26 @@ def simulate_tie_in_path(
 # contributions = np.zeros(T+1)
 # contributions[0] = 100  # Initial contribution at month 0
 
-# allow_short = False
+allow_short = False
 # portfolio_strategy = "european_equity" # "markowitz" or "risk_parity", european_equity
-# market = "EU"
-# window = 36
+window = 36
 
 # if allow_short:
 #     EU_data = pd.read_csv("csv_files/EXPORT EU EUR.csv")
 #     US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
 
 
-# columns_to_add = list(EU_data.columns[2:36])
+columns_to_add = list(EU_data.columns[2:36])
 
 # # Add the risk free rate to the portfolios such that they are no longer excess returns
 
-# EU_data[columns_to_add] = EU_data[columns_to_add].add(EU_data['RF'], axis=0)
-# US_data[columns_to_add] = US_data[columns_to_add].add(US_data['RF'], axis=0)
+EU_data[columns_to_add] = EU_data[columns_to_add].add(EU_data['RF'], axis=0)
+US_data[columns_to_add] = US_data[columns_to_add].add(US_data['RF'], axis=0)
 
 # ## Markowitz
-# n_points = 10
-# strategy = "tangent"
-# mu_target = 0.01
+n_points = 50
+strategy = "tangent"
+mu_target = 0.05
 
 # ## Risk parity
 # if market == "both": include_market2 = True
@@ -378,213 +402,236 @@ def simulate_tie_in_path(
 # plt.legend(title="Spacing (Ltr−Ltgt)")
 # plt.tight_layout(); plt.show()
 
-def simulate_strategy(portfolio_strategy: str):
-    """Simulate tie-in strategy and return final reserve (MV_R) and total wealth (W)."""
-    T = 120
-    years = 10
-    contributions = np.zeros(T+1)
-    contributions[0] = 100
-    window = 36
-    allow_short = False
-    use_covariance = False
-    target_std = 4
+# eu_factors, us_factors = ["RM_RF", "MOM"], ["RM_RF", "MOM", "SMB"]
 
-    # --- Choose active strategy ---
-    if portfolio_strategy == "markowitz":
-        active_returns_full = np.array(markowitz_historical(EU, window, "tangent", 0.01, 10, allow_short)) / 100
+def analyze_tie_in_strategies(strategy_1: str,
+                              strategy_2: str | None,
+                              zcb_data: pd.DataFrame,
+                              EU_data: pd.DataFrame,
+                              US_data: pd.DataFrame,
+                              eu_factors: list,
+                              us_factors: list,
+                              contributions: np.ndarray = None,
+                              years: int = 10,
+                              window: int = 36,
+                              allow_short: bool = False,
+                              use_covariance: bool = False,
+                              target_std: float = 4,
+                              cfg: TieInConfig | None = None):
+    """
+    Analyze one or two investment strategies (e.g. 'markowitz', 'european_equity') 
+    under the tie-in mechanism:
+      - Runs rolling 10-year tie-in simulations
+      - Generates histograms for Wealth & Reserve
+      - Visualizes path with most tie-ins
+      - Outputs LaTeX summary table (saved to file)
 
-    elif portfolio_strategy == "risk_parity":
-        active_returns_full = risk_parity(EU_data, US_data, "EU", "US", False, window,
-                                          True, True, True, False, False, False,
-                                          use_covariance, allow_short, target_std)
-        active_returns_full = np.array(active_returns_full['return']) / 100
+    If `strategy_2` is None, only one strategy is analyzed.
+    """
 
-    elif portfolio_strategy == "european_equity":
-        active_returns_full = EU_data['RM_RF'][window:].to_numpy() / 100
+    from RF_EUR import zcb_price_generator
+    from markowitz import markowitz_historical
+    from risk_parity import risk_parity
+    from tie_in import simulate_tie_in_path  # adjust path if needed
 
-    else:
-        raise ValueError("Unknown strategy")
+    T = 12 * years
+    if contributions is None:
+        contributions = np.zeros(T + 1)
+        contributions[0] = 100
 
-    # --- Simulate rolling 10-year paths ---
-    MVR_120, W_120 = [], []
+    # ---------------------------------------------------------
+    # BUILD ACTIVE RETURNS
+    # ---------------------------------------------------------
+    def get_active_returns(name: str) -> np.ndarray:
+        if name == "markowitz":
+            return np.array(
+                markowitz_historical(EU_data, US_data, eu_factors, us_factors,
+                                     window, "tangent", 0.05, 50, allow_short)
+            ) / 100
+        elif name == "risk_parity":
+            rp = risk_parity(EU_data, US_data, "EU", "US", False, window,
+                             True, True, True, False, False, False,
+                             use_covariance, allow_short, target_std)
+            return np.array(rp["return"]) / 100
+        elif name == "european_equity":
+            return EU_data["RM_RF"][window:].to_numpy() / 100
+        else:
+            raise ValueError(f"Unknown strategy '{name}'")
+
+    # ---------------------------------------------------------
+    # RUN A SINGLE STRATEGY
+    # ---------------------------------------------------------
+    def run_strategy(name: str):
+        active_returns_full = get_active_returns(name)
+        MVR_120, W_120, TIE_120 = [], [], []
+
+        for i in range(len(active_returns_full) - T):
+            zcb_prices = zcb_price_generator(years, T + 1, start=i, data=zcb_data)
+            active_returns = active_returns_full[i:i + T]
+            summary = simulate_tie_in_path(active_returns, zcb_prices, contributions, cfg)
+            MVR_120.append(summary.iloc[T]["MV_R"])
+            W_120.append(summary.iloc[T]["W"])
+            TIE_120.append(summary["tie_in"].sum())
+
+        return np.array(MVR_120), np.array(W_120), np.array(TIE_120)
+
+    # ---------------------------------------------------------
+    # RUN ONE OR TWO STRATEGIES
+    # ---------------------------------------------------------
+    results = {}
+
+    print(f"Running {strategy_1.capitalize()} strategy...")
+    MVR_1, W_1, TIE_1 = run_strategy(strategy_1)
+    results[strategy_1.capitalize()] = {"MV_R": MVR_1, "W": W_1, "tieins": TIE_1}
+
+    if strategy_2:
+        print(f"Running {strategy_2.capitalize()} strategy...")
+        MVR_2, W_2, TIE_2 = run_strategy(strategy_2)
+        results[strategy_2.capitalize()] = {"MV_R": MVR_2, "W": W_2, "tieins": TIE_2}
+
+    # ---------------------------------------------------------
+    # HISTOGRAMS
+    # ---------------------------------------------------------
+    fig, axes = plt.subplots(1, 2, figsize=(13,6), sharey=True)
+    bins = 40
+
+    colors = ["#1f77b4", "#ff7f0e"]
+    color_map = {name: colors[i % len(colors)] for i, name in enumerate(results.keys())}
+
+    # Reserve histogram
+    ax = axes[0]
+    for name, res in results.items():
+        ax.hist(res["MV_R"], bins=bins, alpha=0.45, density=True,
+                label=name, color=color_map[name], edgecolor='black')
+        ax.axvline(np.mean(res["MV_R"]), color=color_map[name], linestyle="--", linewidth=2)
+    ax.set_title("Final Reserve Value (MV_R)")
+    ax.set_xlabel("Value after 10 years")
+    ax.set_ylabel("Density")
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.6)
+
+    # Wealth histogram
+    ax = axes[1]
+    for name, res in results.items():
+        ax.hist(res["W"], bins=bins, alpha=0.45, density=True,
+                label=name, color=color_map[name], edgecolor='black')
+        ax.axvline(np.mean(res["W"]), color=color_map[name], linestyle="--", linewidth=2)
+    ax.set_title("Final Total Wealth (W)")
+    ax.set_xlabel("Value after 10 years")
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.6)
+
+    title = (f"Distribution of Final Outcomes — {strategy_1.capitalize()}"
+             if not strategy_2
+             else f"Distribution of Final Outcomes — {strategy_1.capitalize()} vs. {strategy_2.capitalize()}")
+    plt.suptitle(title, fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig("tie_in_histograms.png", dpi=300)
+    plt.close()
+
+    # ---------------------------------------------------------
+    # MOST ACTIVE PATH (from strategy_1)
+    # ---------------------------------------------------------
+    active_returns_full = get_active_returns(strategy_1)
+    best_i, best_tieins, best_summary = None, -1, None
     for i in range(len(active_returns_full) - T):
         zcb_prices = zcb_price_generator(years, T + 1, start=i, data=zcb_data)
         active_returns = active_returns_full[i:i+T]
-        summary = simulate_tie_in_path(active_returns, zcb_prices, contributions)
-        MVR_120.append(summary.iloc[T, :]['MV_R'])
-        W_120.append(summary.iloc[T, :]['W'])
-    
-    return np.array(MVR_120), np.array(W_120)
+        summary = simulate_tie_in_path(active_returns, zcb_prices, contributions, cfg)
+        tieins = summary["tie_in"].sum()
+        if tieins > best_tieins:
+            best_i, best_tieins, best_summary = i, tieins, summary
 
+    wealth = best_summary["W"].to_numpy()
+    reserve = best_summary["MV_R"].to_numpy()
+    guarantee = best_summary["N"].to_numpy()
+    months = best_summary["month"].to_numpy()
+    tie_idx = best_summary.index[best_summary["tie_in"]]
 
-# --- Select which strategy to compare ---
-chosen_strategy = "markowitz"   # change to "risk_parity" if you want
+    plt.figure(figsize=(8,6))
+    plt.plot(months, wealth, color="red", label="Wealth")
+    plt.plot(months, reserve, color="blue", label="Reserve (MV_R)")
+    plt.plot(months, guarantee, color="green", label="Guarantee (N)", linewidth=2)
+    plt.scatter(months[tie_idx], guarantee[tie_idx],
+                color="green", edgecolor="black", zorder=5, s=60, label="Tie-in events")
+    plt.title(f"Tie-In Wealth and Guarantee Over Time ({strategy_1.capitalize()})")
+    plt.xlabel("Month")
+    plt.ylabel("Amount")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("tie_in_path_visualization.png", dpi=300)
+    plt.close()
 
-# --- Run both chosen strategy and benchmark ---
-print(f"Running {chosen_strategy.capitalize()} strategy...")
-MVR_active, W_active = simulate_strategy(chosen_strategy)
-print("Running European Equity benchmark...")
-MVR_benchmark, W_benchmark = simulate_strategy("european_equity")
+    # ---------------------------------------------------------
+    # SUMMARY TABLE
+    # ---------------------------------------------------------
+    rows = []
+    for name, res in results.items():
+        MV_R, W, tieins = res["MV_R"], res["W"], res["tieins"]
+        mean_G = np.mean(MV_R)
+        mean_W = np.mean(W)
+        avg_T = np.mean(tieins)
+        vol_W = np.std(W)
+        SR_W = (mean_W - 100) / vol_W if vol_W != 0 else np.nan
+        min_N = np.min(MV_R)
 
-results = {
-    chosen_strategy.capitalize(): {"MV_R": MVR_active, "W": W_active},
-    "European Equity": {"MV_R": MVR_benchmark, "W": W_benchmark}
-}
+        rows.append({
+            "Strategy": name,
+            "m(G)": round(mean_G),
+            "m(W)": round(mean_W),
+            "m(Tie-Ins)": round(avg_T, 2),
+            "V(W)": round(vol_W, 2),
+            "SR(W)": round(SR_W, 2),
+            "min(N)": round(min_N)
+        })
 
+    summary_df = pd.DataFrame(rows)
+    latex_caption = (f"Summary of Tie-In Outcomes for {strategy_1.capitalize()} (10-Year Horizon)"
+                     if not strategy_2
+                     else f"Summary of Tie-In Outcomes ({strategy_1.capitalize()} vs. {strategy_2.capitalize()}, 10-Year Horizon)")
 
-# --- Plot side-by-side histograms ---
-fig, axes = plt.subplots(1, 2, figsize=(13,6), sharey=True)
-bins = 40
-colors = {
-    chosen_strategy.capitalize(): "#1f77b4",
-    "European Equity": "#ff7f0e"
-}
+    latex_table = summary_df.to_latex(
+        index=False,
+        caption=latex_caption,
+        label="tab:tie_in_summary",
+        column_format="lrrrrrr",
+        escape=False
+    )
 
-# Left panel: Reserve portfolio (MV_R)
-ax = axes[0]
-for name, res in results.items():
-    ax.hist(res["MV_R"], bins=bins, alpha=0.45, density=True, label=name,
-            color=colors[name], edgecolor='black')
-    ax.axvline(np.mean(res["MV_R"]), color=colors[name], linestyle="--", linewidth=2)
-ax.set_title("Final Reserve Value (MV_R)")
-ax.set_xlabel("Value after 10 years")
-ax.set_ylabel("Density")
-ax.grid(True, linestyle="--", alpha=0.6)
-ax.legend()
+    filename = f"tie_in_summary_{strategy_1.lower()}" + (f"_vs_{strategy_2.lower()}" if strategy_2 else "") + ".tex"
+    with open(filename, "w") as f:
+        f.write(latex_table)
 
-# Right panel: Total wealth (W)
-ax = axes[1]
-for name, res in results.items():
-    ax.hist(res["W"], bins=bins, alpha=0.45, density=True, label=name,
-            color=colors[name], edgecolor='black')
-    ax.axvline(np.mean(res["W"]), color=colors[name], linestyle="--", linewidth=2)
-ax.set_title("Final Total Wealth (W)")
-ax.set_xlabel("Value after 10 years")
-ax.grid(True, linestyle="--", alpha=0.6)
-ax.legend()
+    print("\n✅ Outputs saved:")
+    print(" - tie_in_histograms.png")
+    print(" - tie_in_path_visualization.png")
+    print(f" - {filename}\n")
+    print(summary_df)
+    print("\nLaTeX Table:\n", latex_table)
 
-plt.suptitle(f"Distribution of Final Outcomes — {chosen_strategy.capitalize()} vs. European Equity", fontsize=14)
-plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.savefig("tie_in_histograms.png", dpi=300)
-plt.close()
+    return summary_df, latex_table
 
-# --- Print summary statistics ---
-summary_df = pd.DataFrame({
-    name: {
-        "MV_R mean": np.mean(res["MV_R"]),
-        "MV_R std": np.std(res["MV_R"]),
-        "W mean": np.mean(res["W"]),
-        "W std": np.std(res["W"])
-    }
-    for name, res in results.items()
-}).T.round(2)
+cfg = TieInConfig(L_target=1.2, L_trigger=1.3)
 
-print("\nSummary of outcomes:")
-print(summary_df)
+# analyze_tie_in_strategies(
+#     strategy_1="markowitz",
+#     strategy_2="european_equity",
+#     zcb_data=zcb_data,
+#     EU_data=EU_data,
+#     US_data=US_data,
+#     eu_factors=["RM_RF", "MOM"],
+#     us_factors=["RM_RF", "MOM", "SMB"],
+#     cfg=cfg
+# )
 
-
-def simulate_tie_in_effects(portfolio_strategy: str):
-    """Simulate tie-ins: return number of tie-ins and total reserve added from tie-ins per path."""
-    T = 120
-    years = 10
-    contributions = np.zeros(T+1)
-    contributions[0] = 100
-    window = 36
-    allow_short = False
-    use_covariance = False
-    target_std = 4
-
-    # --- Select active strategy ---
-    if portfolio_strategy == "markowitz":
-        active_returns_full = np.array(markowitz_historical(EU, window, "tangent", 0.01, 10, allow_short)) / 100
-    elif portfolio_strategy == "risk_parity":
-        active_returns_full = risk_parity(EU_data, US_data, "EU", "US", False, window,
-                                          True, True, True, False, False, False,
-                                          use_covariance, allow_short, target_std)
-        active_returns_full = np.array(active_returns_full['return']) / 100
-    elif portfolio_strategy == "european_equity":
-        active_returns_full = EU_data['RM_RF'][window:].to_numpy() / 100
-    else:
-        raise ValueError("Unknown strategy")
-
-    num_tie_ins, added_to_reserve = [], []
-
-    # --- Rolling simulation ---
-    for i in range(len(active_returns_full) - T):
-        zcb_prices = zcb_price_generator(years, T + 1, start=i, data=zcb_data)
-        active_returns = active_returns_full[i:i+T]
-        summary = simulate_tie_in_path(active_returns, zcb_prices, contributions)
-
-        # count tie-ins
-        num_tie_ins.append(summary["tie_in"].sum())
-
-        # calculate reserve added *only during tie-ins*
-        reserve_changes = summary["MV_R"].diff()
-        added_amount = reserve_changes[summary["tie_in"]].sum()
-        added_to_reserve.append(added_amount)
-
-    return np.array(num_tie_ins), np.array(added_to_reserve)
-
-
-# --- Choose strategy to compare ---
-
-# --- Run both chosen and benchmark ---
-print(f"Running {chosen_strategy.capitalize()} strategy...")
-tieins_active, reserve_added_active = simulate_tie_in_effects(chosen_strategy)
-print("Running European Equity benchmark...")
-tieins_benchmark, reserve_added_benchmark = simulate_tie_in_effects("european_equity")
-
-results = {
-    chosen_strategy.capitalize(): {"tieins": tieins_active, "reserve_added": reserve_added_active},
-    "European Equity": {"tieins": tieins_benchmark, "reserve_added": reserve_added_benchmark}
-}
-
-# --- Plot results side by side ---
-fig, axes = plt.subplots(1, 2, figsize=(13,6))
-
-colors = {
-    chosen_strategy.capitalize(): "#1f77b4",
-    "European Equity": "#ff7f0e"
-}
-
-# Left: number of tie-ins
-ax = axes[0]
-for name, res in results.items():
-    ax.hist(res["tieins"], bins=range(0, int(max(res["tieins"].max(), res["tieins"].max())) + 2),
-            alpha=0.45, label=name, color=colors[name], edgecolor='black')
-ax.set_title("Distribution of Number of Tie-Ins (per 10-year path)")
-ax.set_xlabel("# Tie-ins")
-ax.set_ylabel("Frequency")
-ax.legend()
-ax.grid(True, linestyle="--", alpha=0.6)
-
-# Right: total reserve added from tie-ins
-ax = axes[1]
-for name, res in results.items():
-    ax.hist(res["reserve_added"], bins=40, alpha=0.45, density=True,
-            label=name, color=colors[name], edgecolor='black')
-    ax.axvline(np.mean(res["reserve_added"]), color=colors[name], linestyle="--", linewidth=2)
-ax.set_title("Total Reserve Added by Tie-Ins (per 10-year path)")
-ax.set_xlabel("Reserve Added (currency units)")
-ax.set_ylabel("Density")
-ax.legend() 
-ax.grid(True, linestyle="--", alpha=0.6)
-
-plt.suptitle(f"Tie-In Frequency and Impact — {chosen_strategy.capitalize()} vs. European Equity", fontsize=14)
-plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.savefig("tie_in_effects.png", dpi=300)
-plt.close()
-
-# --- Print summary statistics ---
-summary = pd.DataFrame({
-    name: {
-        "Avg # Tie-ins": np.mean(res["tieins"]),
-        "Avg Reserve Added": np.mean(res["reserve_added"]),
-        "Std Reserve Added": np.std(res["reserve_added"])
-    }
-    for name, res in results.items()
-}).T.round(2)
-
-print("\nSummary of tie-in behavior:")
-print(summary)
-
+analyze_tie_in_strategies(
+    strategy_1="european_equity",
+    strategy_2=None,
+    zcb_data=zcb_data,
+    EU_data=EU_data,
+    US_data=US_data,
+    eu_factors=["RM_RF", "MOM"],
+    us_factors=["RM_RF", "MOM", "SMB"],
+    cfg=cfg
+)

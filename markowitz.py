@@ -6,27 +6,9 @@ import matplotlib.pyplot as plt
 
 # Read CSV files:
 
-EU_data = pd.read_csv("csv_files/EXPORT EU EUR.csv")
+EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
 
-US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
-
-# Select columns with assets, and prefix EU/US to each asset.
-
-portfolios = list(EU_data.columns[5:36])
-
-EU = EU_data[portfolios]
-
-EU.columns = ["EU_" + p for p in portfolios]
-
-US = US_data[portfolios]
-
-US.columns = ["US_" + p for p in portfolios]
-
-# Make a combined datafrme with all assets.
-
-all_assets = pd.concat([EU,US],axis = 1)
-
-
+US_data = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 
 
 # Define the objective and constraint functions for the minimization problem
@@ -100,8 +82,8 @@ def efficient_frontier(mean_return, cov_matrix, n_points=150, allow_short = Fals
                 frontier_returns.append(port_return)
                 frontier_variance.append(np.sqrt(port_var))
                 frontier_weights.append(w)
-            else:
-                print(f"Optimization failed for target return {mu:.4f}: {res.message}")
+            # else:
+            #     print(f"Optimization failed for target return {mu:.4f}: {res.message}")
     if not allow_short:
         for mu in target_returns:
             res = markowitz_optimizer(mean_return, cov_matrix, mu, direction="min")
@@ -112,8 +94,8 @@ def efficient_frontier(mean_return, cov_matrix, n_points=150, allow_short = Fals
                 frontier_returns.append(port_return)
                 frontier_variance.append(np.sqrt(port_var))
                 frontier_weights.append(w)
-            else:
-                print(f"Optimization failed for target return {mu:.4f}: {res.message}")
+            # else:
+            #     print(f"Optimization failed for target return {mu:.4f}: {res.message}")
 
     return np.array(frontier_variance), np.array(frontier_returns), np.array(frontier_weights)
 
@@ -123,28 +105,50 @@ def efficient_frontier(mean_return, cov_matrix, n_points=150, allow_short = Fals
 def frontier_plotter(risks, returns):
     plt.figure(figsize=(10, 6))
     plt.plot(risks, returns, 'b-', lw=2)
-    plt.xlabel('Portfolio Risk (σ)')
-    plt.ylabel('Expected Return (μ)')
-    plt.title('Mean–Variance Frontier (with shorting)')
+    plt.xlabel('Portfolio Risk (Standard Deviation)')
+    plt.ylabel('Expected Excess Return')
+    plt.title('Mean–Variance Frontier')
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend()
     plt.gca().xaxis.set_major_formatter(lambda v,pos: f"{v:.1f}%")
     plt.gca().yaxis.set_major_formatter(lambda v,pos: f"{v:.1f}%")
-    plt.savefig("efficient_frontier_short.png")
+    # saves plot in high resolution
+    plt.savefig("efficient_frontier.png", dpi=300)
     #plt.show()
 
-mean_return = EU.mean().to_numpy()
-cov_matrix = EU.cov().to_numpy()
 
-#variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points=150)
+us_factors, eu_factors = ["RM_RF", "MOM"], ["RM_RF", "MOM", "SMB"]
 
-#frontier_plotter(variance_s, returns_s)
+eu = EU_data[eu_factors]
+# prefix EU_ to each column name to avoid duplicates
+eu.columns = ["EU_" + col for col in eu.columns]
+us = US_data[us_factors]
+# prefix US_ to each column name to avoid duplicates
+us.columns = ["US_" + col for col in us.columns]
+
+data = pd.concat([eu, us], axis = 1)
+
+mean_return = data.mean().to_numpy()
+cov_matrix = data.cov().to_numpy()
+
+variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points=150)
+
+# frontier_plotter(variance, returns)
 
 # We want to invest in the portfolio with the highest sharpe ratio, that is the tangent portfolio
 # but we can't use theoretical results because we have a no-shorting constraint
 # Therefore we use the efficient frontier function to find (a portfolio close to) the tangent portfolio by taking the one with the highest sharpe ratio
 
-def markowitz_strategy(data, mu_target = 0.5, n_points = 50, strategy = "tangent", allow_short = False):
+def markowitz_strategy(eu_data, us_data, eu_factors,us_factors, mu_target = 0.5, n_points = 50, strategy = "tangent", allow_short = False):
+    eu = eu_data[eu_factors]
+    # prefix EU_ to each column name to avoid duplicates
+    eu.columns = ["EU_" + col for col in eu.columns]
+    us = us_data[us_factors]
+    # prefix US_ to each column name to avoid duplicates
+    us.columns = ["US_" + col for col in us.columns]
+
+    data = pd.concat([eu, us], axis = 1)
+
     mean_return = data.mean().to_numpy()
     cov_matrix = data.cov().to_numpy()
 
@@ -162,6 +166,28 @@ def markowitz_strategy(data, mu_target = 0.5, n_points = 50, strategy = "tangent
         idx_tangent = np.argmax(sharpe)
 
         return(weights[idx_tangent])
+    
+    if strategy == "min_variance":
+        variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points, allow_short= allow_short)
+        
+        # Check if we got valid results
+        if len(variance) == 0:
+            print("Warning: No valid frontier points found, using equal weights")
+            return np.ones(len(mean_return)) / len(mean_return)
+
+        idx = np.argmin(variance)
+
+        return(weights[idx])
+
+    if strategy == "max_return":
+        max_return = max(mean_return)
+        result = markowitz_optimizer(mean_return, cov_matrix, mu_target, direction = "min")
+        if result.success:
+            return(result.x)
+        else:
+            #print("Warning: Fixed strategy optimization failed, using equal weights")
+            return np.ones(len(mean_return)) / len(mean_return)   
+
     
     if strategy == "fixed":
         result = markowitz_optimizer(mean_return, cov_matrix, mu_target, direction = "min")
@@ -188,15 +214,25 @@ def markowitz_strategy(data, mu_target = 0.5, n_points = 50, strategy = "tangent
 def rolling_dataframes(data, window_size):
     return [data.iloc[i:i+window_size] for i in range(data.shape[0] - window_size + 1)]
 
-def markowitz_historical(data, window, strategy = "tangent", mu_target = 0.05, n_points = 50, allow_short = False):
-    rolling_data = rolling_dataframes(data, window)
+def markowitz_historical(eu_data, us_data, eu_factors, us_factors, window, strategy = "tangent", mu_target = 0.05, n_points = 50, allow_short = False):
+    rolling_data_eu = rolling_dataframes(eu_data, window)
+    rolling_data_us = rolling_dataframes(us_data, window)
 
-    N = data.shape[0]
+    eu = eu_data[eu_factors]
+    # prefix EU_ to each column name to avoid duplicates
+    eu.columns = ["EU_" + col for col in eu.columns]
+    us = us_data[us_factors]
+    # prefix US_ to each column name to avoid duplicates
+    us.columns = ["US_" + col for col in us.columns]
+
+    data = pd.concat([eu, us], axis = 1)
+
+    N = eu_data.shape[0]
 
     actual_return = np.zeros(N - window)
 
     for i in range(N - window):
-        weights = markowitz_strategy(rolling_data[i], mu_target, n_points, strategy = strategy, allow_short=allow_short)
+        weights = markowitz_strategy(rolling_data_eu[i], rolling_data_us[i], eu_factors, us_factors, mu_target, n_points, strategy, allow_short)
         next_per_return = np.array(data.iloc[window + i, :])
         actual_return[i] = weights.T @ next_per_return
     

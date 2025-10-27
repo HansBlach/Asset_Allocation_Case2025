@@ -48,7 +48,7 @@ def result_plot(EU_data, US_data, window, n_points, eu_factors, us_factors, mark
     markowitz_returns_tan = markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "tangent", n_points = n_points, allow_short=markowitz_short)
     markowitz_value_tan = returns_to_value(markowitz_returns_tan)
 
-    # Use markowitz function to get markowitz return and value development of min_var strategy
+    # # Use markowitz function to get markowitz return and value development of min_var strategy
     # markowitz_returns_minvar = markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "min_variance", n_points = n_points, allow_short=markowitz_short)
     # markowitz_value_minvar = returns_to_value(markowitz_returns_minvar)
 
@@ -111,10 +111,10 @@ if long_only:
     EU_data = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
     US_data = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
 
-has_MOM1, has_SMB1, has_RM_RF1 = True, False, True
+has_MOM1, has_SMB1, has_RM_RF1 = True, True, True
 has_MOM2, has_SMB2, has_RM_RF2 = True, True, True
 
-eu_factors, us_factors = ["RM_RF", "MOM"], ["RM_RF", "MOM", "SMB"]
+eu_factors, us_factors = ["MOM", "RM_RF", "SMB"], ["RM_RF", "MOM", "SMB"]
 
 markowitz_returns_tan, risk_parity_returns, market_returns = result_plot(name = "Markowitz vs Risk Parity", EU_data = EU_data, US_data = US_data, eu_factors = eu_factors, us_factors = us_factors, n_points = n_points, window = window, markowitz_short= False, data = "both", baseline_market= "EU", has_SMB1=has_SMB1, has_SMB2=has_SMB2, has_MOM1=has_MOM1, has_MOM2=has_MOM2, has_RM_RF1=has_RM_RF1, has_RM_RF2=has_RM_RF2)
 
@@ -140,11 +140,15 @@ strategies = {
 
 
 data = []
-for name, returns in strategies.items():
-    mean = annualizer(np.mean(returns), "return")
-    std = annualizer(np.std(returns), "volatility")
-    sharpe = mean / std 
-    data.append([mean, std, sharpe])
 
-summary = pd.DataFrame(data, columns=["Mean", "Std", "Sharpe"], index=strategies.keys())
+n = len(EU_data["MOM"]) - window
+
+for name, returns in strategies.items():
+    mean = np.mean(returns)
+    std = np.std(returns)
+    sharpe = mean / std 
+    t_stat = sharpe * np.sqrt(n)
+    data.append([mean, std, sharpe, t_stat])
+
+summary = pd.DataFrame(data, columns=["Mean", "Std", "Sharpe", "t-stat"], index=strategies.keys())
 print(summary)

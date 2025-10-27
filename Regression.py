@@ -7,7 +7,6 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 # Load the data from CSV files
 df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
-print(df_EU)
 df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
 df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
 
@@ -153,7 +152,8 @@ def data_interpreter(df):
 
     # Create a DataFrame with only portfolios present in the 5 worst R2 tables
     worst_portfolios = set(R2_5_worst.index) | set(R2_5_worst_RM_RF.index) | set(R2_5_worst_SMB.index) | set(R2_5_worst_MOM.index)
-    summary_df = pd.DataFrame(0, index=sorted(worst_portfolios), columns=["RM_RF", "SMB", "MOM"])
+    # Create a DataFrame with only portfolios present in the 5 worst R2 tables
+    summary_df = pd.DataFrame(0.0, index=sorted(worst_portfolios), columns=["RM_RF", "SMB", "MOM"])
 
     for name, worst, result in [
         ("RM_RF", R2_5_worst_RM_RF, res_RM_RF),
@@ -161,11 +161,11 @@ def data_interpreter(df):
         ("MOM", R2_5_worst_MOM, res_MOM),
     ]:
         for portfolio in worst.index:
-            summary_df.loc[portfolio, name] = result.loc[portfolio, "R2"]
+            summary_df.loc[portfolio, name] = float(result.loc[portfolio, "R2"])
 
-    summary_df["none"] = 0
+    summary_df["none"] = 0.0
     for portfolio in R2_5_worst.index:
-        summary_df.loc[portfolio, "none"] = res.loc[portfolio, "R2"]
+        summary_df.loc[portfolio, "none"] = float(res.loc[portfolio, "R2"])
 
     summary_df = summary_df[["none", "RM_RF", "SMB", "MOM"]]
 
@@ -174,7 +174,7 @@ def data_interpreter(df):
             return 0
         return f"{x:.3f}"
 
-    summary_df = summary_df.applymap(format_value)
+    summary_df = summary_df.map(format_value)
     summary_df.loc["m_R2"] = [f"{m_R2:.3f}", f"{m_R2_RM_RF:.3f}", f"{m_R2_SMB:.3f}", f"{m_R2_MOM:.3f}"]
     summary_df.loc["explanatory_loss"] = [
         "0.000",
@@ -182,7 +182,9 @@ def data_interpreter(df):
         f"{explanatory_power_loss_SMB:.3f}",
         f"{explanatory_power_loss_MOM:.3f}"
     ]
-    summary_df["total"] = summary_df[["none", "RM_RF", "SMB", "MOM"]].apply(lambda row: sum([v != 0 for v in row]), axis=1)
+    summary_df["total"] = summary_df[["none", "RM_RF", "SMB", "MOM"]].apply(
+        lambda row: sum(v != 0 for v in row), axis=1
+    )
     summary_df.index.name = "without factor"
 
     # ------------------------------------------------------------------------
@@ -229,20 +231,70 @@ def data_interpreter(df):
         {"RM_RF": t_reject_names_RF_RM_no_MOM, "SMB": t_reject_names_SMB_no_MOM}
     )
 
-    print("\n=== All Factors ===")
-    print(summary_all)
-    print("\n=== Without Market Rate (RM_RF) ===")
-    print(summary_no_RM)
-    print("\n=== Without SMB ===")
-    print(summary_no_SMB)
-    print("\n=== Without MOM ===")
-    print(summary_no_MOM)
+       # ------------------------------------------------------------------------
+    # ADDITION: Alpha (t(a)) significance overview (|t(a)| > 1.96)
+    # ------------------------------------------------------------------------
+
+    # Re-run regression with only RM_RF as explanatory variable
+    explanatory_cols_only_RM_RF = ["RM_RF"]
+    res_only_RM_RF = run_regression(df, explanatory_cols_only_RM_RF)
+
+    # Boolean masks for significant alphas
+    sig_all = res["t(a)"].abs() > 2
+    sig_only_RM_RF = res_only_RM_RF["t(a)"].abs() > 2
+    sig_no_SMB = res_SMB["t(a)"].abs() > 2
+    sig_no_MOM = res_MOM["t(a)"].abs() > 2
+
+    # Extract portfolios where condition is True
+    sig_portfolios_all = list(sig_all[sig_all].index)
+    sig_portfolios_only_RM_RF = list(sig_only_RM_RF[sig_only_RM_RF].index)
+    sig_portfolios_no_SMB = list(sig_no_SMB[sig_no_SMB].index)
+    sig_portfolios_no_MOM = list(sig_no_MOM[sig_no_MOM].index)
+
+    # Helper to make table with count row
+    def make_table(portfolios):
+        df_table = pd.DataFrame({"portfolio": portfolios})
+        df_table.loc[len(df_table)] = {"portfolio": f"Total significant: {len(portfolios)}"}
+        return df_table
+
+    # Create tables for each regression setup
+    t_alpha_all = make_table(sig_portfolios_all)
+    t_alpha_only_RM_RF = make_table(sig_portfolios_only_RM_RF)
+    t_alpha_no_SMB = make_table(sig_portfolios_no_SMB)
+    t_alpha_no_MOM = make_table(sig_portfolios_no_MOM)
+
+    # Print tables
+    print("\n=== Portfolios with |t(a)| > 2 (All Factors) ===")
+    print(t_alpha_all.to_string(index=False))
+
+    print("\n=== Portfolios with |t(a)| > 2 (Only RM_RF) ===")
+    print(t_alpha_only_RM_RF.to_string(index=False))
+
+    print("\n=== Portfolios with |t(a)| > 2 (Without SMB) ===")
+    print(t_alpha_no_SMB.to_string(index=False))
+
+    print("\n=== Portfolios with |t(a)| > 2 (Without MOM) ===")
+    print(t_alpha_no_MOM.to_string(index=False))
+
+
+    # print("\n=== All Factors ===")
+    # print(summary_all)
+    # print("\n=== Without Market Rate (RM_RF) ===")
+    # print(summary_no_RM)
+    # print("\n=== Without SMB ===")
+    # print(summary_no_SMB)
+    # print("\n=== Without MOM ===")
+    # print(summary_no_MOM)
 
     # return main R² summary (tables are printed)
     return summary_df
 
-
-# R2_summary = data_interpreter(df_USEUR)
+print("===EU==")
+R2_summary = data_interpreter(df_EU)
+print("===US EUR==")
+R2_summary = data_interpreter(df_USEUR)
+print("===US USD==")
+R2_summary = data_interpreter(df_US)
 # print("Baseline US EUR regression summary:")
 # print(R2_summary)
 

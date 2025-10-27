@@ -16,9 +16,9 @@ class CPPIParams:
     m: float = 3             # CPPI multiplier (>=1)
     b: float = 1.0           # max leverage ratio (keep at 1.0 for "no leverage")
     W0: float = 100        # initial wealth
-    L_target: float = 1.25   # target funded ratio
-    L_trigger: float = 1.5  # trigger funded ratio for tie-in
-    F0: float = 80 # (W0 / L_target)         # initial floor in currency (e.g., 80 for 80/20 split)
+    L_target: float = 1.5   # target funded ratio
+    L_trigger: float = 2  # trigger funded ratio for tie-in
+    # F0: float = 80 (W0 / L_target)         # initial floor in currency (e.g., 80 for 80/20 split)
 
 
 def CPPI(
@@ -43,7 +43,7 @@ def CPPI(
     m = cppip.m
     b = cppip.b
     W0 = cppip.W0
-    F0 = cppip.F0
+    F0 = W0 / cppip.L_target          # initial floor in currency
 
 
     # Starting values for price processes
@@ -74,7 +74,7 @@ def CPPI(
         "W": eta_A*A + eta_R*R,
         "Floor": F0,
         "Cushion": cushion,
-        "Guarantee": F0 * R,
+        "Guarantee": F0 / R,
         "P": R,
         "E": E0,
         "L": (eta_A * A + eta_R * R) / F0,           # Her genbruger vi konceptet med funded ratio
@@ -155,7 +155,7 @@ def CPPI(
             "W": W,
             "Floor": F,
             "Cushion": max(W - F, 0.0),
-            "Guarantee":F * R,
+            "Guarantee":F / R,
             "P": R,
             "E": E,
             "L": L,

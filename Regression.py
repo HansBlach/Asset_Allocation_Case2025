@@ -7,7 +7,6 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 # Load the data from CSV files
 df_EU = pd.read_csv("csv_files/EXPORT EU EUR.csv")
-print(df_EU)
 df_USEUR = pd.read_csv("csv_files/EXPORT US EUR.csv")
 df_US = pd.read_csv("csv_files/EXPORT US USD.csv")
 
@@ -22,7 +21,7 @@ explanatory_cols = ["RM_RF", "SMB", "MOM"]
 def run_regression(df, explanatory_cols):
     # Fra chat: Coerce to numeric where possible and drop impossible rows per portfolio ---
     # Do for all portfolios in sorted data set
-    portfolio_cols = list(df.columns[11:36])
+    portfolio_cols = list(df.columns[5:36])
     # (Factor columns must exist)
     missing = [c for c in explanatory_cols if c not in df.columns]
     if missing:
@@ -51,7 +50,7 @@ def run_regression(df, explanatory_cols):
         # Create and fit the model and t-statistic
        # === Use statsmodels so we get standard errors and t-stats ===
         X_const = sm.add_constant(X)                     # adds intercept term 'const'
-        ols_res = sm.OLS(y, X_const).fit(cov_type="HAC", cov_kwds={"maxlags":12})
+        ols_res = sm.OLS(y, X_const).fit()               # OLS fit
 
         # Map names for clarity
         a      = ols_res.params.get("const", np.nan)
@@ -80,7 +79,7 @@ def run_regression(df, explanatory_cols):
             "t(s)": t_s,
             "m": m,
             "t(m)": t_m,
-            "R2": ols_res.rsquared_adj,
+            "R2": ols_res.rsquared,
             #"MSE": np.sqrt((y-y_pred)^2), KOM EVT. TILBAGE TIL FEJLEN
         })
 
@@ -120,41 +119,24 @@ def data_interpreter(df):
     m_R2_RM_RF = np.mean(res_RM_RF["R2"])
     explanatory_power_loss= m_R2 - np.mean(res_RM_RF["R2"])
     R2_5_worst_RM_RF = res_RM_RF["R2"].nsmallest(5)
-    m_ts_no_RM_RF = np.mean(abs(res_RM_RF["t(s)"]))
-    m_tm_no_RM_RF = np.mean(abs(res_RM_RF["t(m)"]))
-    t_reject_count_SMB_no_RM_RF = (abs(res_RM_RF["t(s)"]) < 2.).sum()
-    t_reject_names_SMB_no_RM_RF = list(res_RM_RF[abs(res_RM_RF["t(s)"]) < 2.].index)
-    t_reject_count_MOM_no_RM_RF = (abs(res_RM_RF["t(m)"]) < 2.).sum()
-    t_reject_names_MOM_no_RM_RF = list(res_RM_RF[abs(res_RM_RF["t(m)"]) < 2.].index)
 
     explanatory_cols_SMB = ["RM_RF", "MOM"]
     res_SMB = run_regression(df, explanatory_cols_SMB)
     m_R2_SMB = np.mean(res_SMB["R2"])
     explanatory_power_loss_SMB= m_R2 - np.mean(res_SMB["R2"])
     R2_5_worst_SMB = res_SMB["R2"].nsmallest(5)
-    m_tb_no_SMB = np.mean(abs(res_SMB["t(beta)"]))
-    m_tm_no_SMB = np.mean(abs(res_SMB["t(m)"]))
-    t_reject_count_RF_RM_no_SMB = (abs(res_SMB["t(beta)"]) < 2.).sum()
-    t_reject_names_RF_RM_no_SMB = list(res_SMB[abs(res_SMB["t(beta)"]) < 2.].index)
-    t_reject_count_MOM_no_SMB = (abs(res_SMB["t(m)"]) < 2.).sum()
-    t_reject_names_MOM_no_SMB = list(res_SMB[abs(res_SMB["t(m)"]) < 2.].index)
 
     explanatory_cols_MOM = ["RM_RF", "SMB"]
     res_MOM = run_regression(df, explanatory_cols_MOM)
     m_R2_MOM = np.mean(res_MOM["R2"])
     explanatory_power_loss_MOM= m_R2 - np.mean(res_MOM["R2"])
     R2_5_worst_MOM = res_MOM["R2"].nsmallest(5)
-    m_tb_no_MOM = np.mean(abs(res_MOM["t(beta)"]))
-    m_ts_no_MOM = np.mean(abs(res_MOM["t(s)"]))
-    t_reject_count_RF_RM_no_MOM = (abs(res_MOM["t(beta)"]) < 2.).sum()
-    t_reject_names_RF_RM_no_MOM = list(res_MOM[abs(res_MOM["t(beta)"]) < 2.].index)
-    t_reject_count_SMB_no_MOM = (abs(res_MOM["t(s)"]) < 2.).sum()
-    t_reject_names_SMB_no_MOM = list(res_MOM[abs(res_MOM["t(s)"]) < 2.].index)
 
     # Create a DataFrame with only portfolios present in the 5 worst R2 tables
     worst_portfolios = set(R2_5_worst.index) | set(R2_5_worst_RM_RF.index) | set(R2_5_worst_SMB.index) | set(R2_5_worst_MOM.index)
     summary_df = pd.DataFrame(0, index=sorted(worst_portfolios), columns=["RM_RF", "SMB", "MOM"])
 
+    # Fill in the 5 worst portfolios for each regression with their R2 values
     for name, worst, result in [
         ("RM_RF", R2_5_worst_RM_RF, res_RM_RF),
         ("SMB", R2_5_worst_SMB, res_SMB),
@@ -163,91 +145,65 @@ def data_interpreter(df):
         for portfolio in worst.index:
             summary_df.loc[portfolio, name] = result.loc[portfolio, "R2"]
 
+    # For the full model, fill in the 5 worst portfolios in the "none" column
     summary_df["none"] = 0
     for portfolio in R2_5_worst.index:
         summary_df.loc[portfolio, "none"] = res.loc[portfolio, "R2"]
 
+    # Reorder columns
     summary_df = summary_df[["none", "RM_RF", "SMB", "MOM"]]
 
+    # Format values: 2 decimals for nonzero, 0 for zeros
     def format_value(x):
         if x == 0:
             return 0
         return f"{x:.3f}"
 
     summary_df = summary_df.applymap(format_value)
+    # Add m_R2 and explanatory_loss as rows
     summary_df.loc["m_R2"] = [f"{m_R2:.3f}", f"{m_R2_RM_RF:.3f}", f"{m_R2_SMB:.3f}", f"{m_R2_MOM:.3f}"]
     summary_df.loc["explanatory_loss"] = [
-        "0.000",
+        "0.000",  # No loss for full model
         f"{explanatory_power_loss:.3f}",
         f"{explanatory_power_loss_SMB:.3f}",
         f"{explanatory_power_loss_MOM:.3f}"
     ]
+
+    # Add "total" column: count of nonzero R2 values per row
     summary_df["total"] = summary_df[["none", "RM_RF", "SMB", "MOM"]].apply(lambda row: sum([v != 0 for v in row]), axis=1)
+
+    # Rename index label
     summary_df.index.name = "without factor"
+    
 
-    # ------------------------------------------------------------------------
-    # ADDITION: Summary tables for t_mean, reject_count, and rejected portfolios
-    # ------------------------------------------------------------------------
-    def make_summary_table(factors, t_means, reject_counts, reject_names):
-        max_rejects = max(len(reject_names[f]) for f in factors)
-        data = {
-            f: [t_means[f], reject_counts[f]] + reject_names[f] + [""] * (max_rejects - len(reject_names[f]))
-            for f in factors
+    # Calculate summary statistics for each factor
+    summary = {
+        "beta": {
+            "t_mean": m_tb,
+            "reject_count": t_reject_count_RF_RM,
+            "reject_names": ", ".join(t_reject_names_RF_RM)
+        },
+        "s": {
+            "t_mean": m_ts,
+            "reject_count": t_reject_count_SMB,
+            "reject_names": ", ".join(t_reject_names_SMB)
+        },
+        "m": {
+            "t_mean": m_tm,
+            "reject_count": t_reject_count_MOM,
+            "reject_names": ", ".join(t_reject_names_MOM)
         }
-        index = ["t_mean", "reject_count"] + [f"rejected_{i+1}" for i in range(max_rejects)]
-        return pd.DataFrame(data, index=index)
+    }
 
-    # --- All factors ---
-    summary_all = make_summary_table(
-        ["RM_RF", "SMB", "MOM"],
-        {"RM_RF": m_tb, "SMB": m_ts, "MOM": m_tm},
-        {"RM_RF": t_reject_count_RF_RM, "SMB": t_reject_count_SMB, "MOM": t_reject_count_MOM},
-        {"RM_RF": t_reject_names_RF_RM, "SMB": t_reject_names_SMB, "MOM": t_reject_names_MOM}
-    )
+    # Create the summary table
+    summary_table = pd.DataFrame({
+        "beta": [summary["beta"]["t_mean"], summary["beta"]["reject_count"], summary["beta"]["reject_names"]],
+        "s": [summary["s"]["t_mean"], summary["s"]["reject_count"], summary["s"]["reject_names"]],
+        "m": [summary["m"]["t_mean"], summary["m"]["reject_count"], summary["m"]["reject_names"]],
+    }, index=["t_mean", "reject_count", "reject_names"])
+    return summary_df, summary_table
 
-    # --- Without Market Rate ---
-    summary_no_RM = make_summary_table(
-        ["SMB", "MOM"],
-        {"SMB": m_ts_no_RM_RF, "MOM": m_tm_no_RM_RF},
-        {"SMB": t_reject_count_SMB_no_RM_RF, "MOM": t_reject_count_MOM_no_RM_RF},
-        {"SMB": t_reject_names_SMB_no_RM_RF, "MOM": t_reject_names_MOM_no_RM_RF}
-    )
-
-    # --- Without SMB ---
-    summary_no_SMB = make_summary_table(
-        ["RM_RF", "MOM"],
-        {"RM_RF": m_tb_no_SMB, "MOM": m_tm_no_SMB},
-        {"RM_RF": t_reject_count_RF_RM_no_SMB, "MOM": t_reject_count_MOM_no_SMB},
-        {"RM_RF": t_reject_names_RF_RM_no_SMB, "MOM": t_reject_names_MOM_no_SMB}
-    )
-
-    # --- Without MOM ---
-    summary_no_MOM = make_summary_table(
-        ["RM_RF", "SMB"],
-        {"RM_RF": m_tb_no_MOM, "SMB": m_ts_no_MOM},
-        {"RM_RF": t_reject_count_RF_RM_no_MOM, "SMB": t_reject_count_SMB_no_MOM},
-        {"RM_RF": t_reject_names_RF_RM_no_MOM, "SMB": t_reject_names_SMB_no_MOM}
-    )
-
-    print("\n=== All Factors ===")
-    print(summary_all)
-    print("\n=== Without Market Rate (RM_RF) ===")
-    print(summary_no_RM)
-    print("\n=== Without SMB ===")
-    print(summary_no_SMB)
-    print("\n=== Without MOM ===")
-    print(summary_no_MOM)
-
-    # return main R² summary (tables are printed)
-    return summary_df
-
-
-R2_summary = data_interpreter(df_EU)
-print("Baseline EU EUR regression summary:")
-print(R2_summary)
-
-# m_dif = compare_models_high_prior_diff_table(df_USEUR, df_long_USEUR, label1="long-short", label2="Long-only")
-# print(m_dif)
+data_interpreter(df_EU)
 
 # Run regression for EU EUR
 results_df_EU = run_regression(df_EU, explanatory_cols)

@@ -290,9 +290,9 @@ def data_interpreter(df):
     return summary_df
 
 
-R2_summary = data_interpreter(df_EU)
-print("Baseline EU EUR regression summary:")
-print(R2_summary)
+# R2_summary = data_interpreter(df_USEUR)
+# print("Baseline EU EUR regression summary:")
+# print(R2_summary)
 
 # m_dif = compare_models_high_prior_diff_table(df_USEUR, df_long_USEUR, label1="long-short", label2="Long-only")
 # print(m_dif)

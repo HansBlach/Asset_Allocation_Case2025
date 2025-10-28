@@ -124,8 +124,8 @@ def covariance_matrix(EU, US, EU_factors, US_factors):
     factor_universe = pd.concat([EU_selected, US_selected], axis = 1)
     return factor_universe.cov()
 
-# print("Covariance matrix of factor universe")
-# print(covariance_matrix(df_long_EU, df_long_US, ["MOM"], ["MOM", "SMB"]))
+print("Covariance matrix of factor universe")
+print(covariance_matrix(df_long_EU, df_long_US, ["MOM", "SMB"], ["RM_RF", "MOM", "SMB"]))
 
 
 

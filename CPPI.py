@@ -210,18 +210,18 @@ if allow_short:
     US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
 
 ## Markowitz
-n_points = 10
+n_points = 50
 strategy = "tangent"
 mu_target = 0.01
 
-eu_factors = ["RM_RF", "MOM"]
+eu_factors = ["SMB", "MOM"]
 us_factors = ["RM_RF", "SMB", "MOM"]
 
 ## Risk parity
 if market == "both": include_market2 = True
 if market == "EU": include_market2 = False
 
-has_MOM1, has_SMB1, has_RM_RF1 = True, False, True
+has_MOM1, has_SMB1, has_RM_RF1 = True, True, False
 has_MOM2, has_SMB2, has_RM_RF2 = True, True, True
 has_MOM2, has_SMB2, has_RM_RF2 = include_market2, include_market2, include_market2
 use_covariance = False
@@ -243,39 +243,42 @@ if portfolio_strategy == "risk_parity":
     active_returns_full = np.array(active_returns_full['return'])/100
 
 
+def path_simulator(active_returns_full, zcb_data, years, T, cppip=CPPIParams(), summary_path = 0):
+    # --- Simulate multiple paths and collect results ---
+    MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee = [], [], [], [], [], []
 
-# --- Simulate multiple paths and collect results ---
-MVA_120, MVR_120, W_120, Return_120, num_tie_in, num_guarantee = [], [], [], [], [], []
+    # forskellige perioder i linjerne under (første og sidste):
+    # for i in range(0, 120):
+    for i in range(len(active_returns_full)-120):
+        
+        zcb_prices = zcb_price_generator(years, T + 1, start = i, data = zcb_data)
+        active_returns = active_returns_full[i:T+i]
 
-# forskellige perioder i linjerne under (første og sidste):
-# for i in range(0, 120):
-for i in range(len(active_returns_full)-120):
-    
-    zcb_prices = zcb_price_generator(years, T + 1, start = i, data = zcb_data)
-    active_returns = active_returns_full[i:T+i]
-    # if i == 25:
-    #     active_returns = np.random.normal(loc= 0 , scale= 0.02, size=T)
-    
-    # if i == 30:
-    #     active_returns = np.random.normal(loc= -0.03 , scale= 0.02, size=T)
+        # Sanity checks
+        assert active_returns.shape == (T ,)
+        assert zcb_prices.shape == (T + 1,)
 
-    # Sanity checks
-    assert active_returns.shape == (T ,)
-    assert zcb_prices.shape == (T + 1,)
+        summary = CPPI(active_returns, zcb_prices, cppip)
 
-    summary = CPPI(active_returns, zcb_prices)
+        summary_120 = summary.iloc[T,:]
 
-    summary_120 = summary.iloc[T,:]
+        # Add observations to results:
+        MVA_120.append(summary_120['MV_A'])
+        MVR_120.append(summary_120['MV_R'])
+        W_120.append(summary_120['W'])
+        Return_120.append((summary_120['W'])/100 - 1.0)
+        guarantee.append(summary_120['Guarantee'])
+        num_tie_in.append(sum(summary['tie_in']))
+        if i == summary_path:
+            active_returns_saved = active_returns
+            zcb_prices_saved = zcb_prices
 
-    # Add observations to results:
-    MVA_120.append(summary_120['MV_A'])
-    MVR_120.append(summary_120['MV_R'])
-    W_120.append(summary_120['W'])
-    Return_120.append((summary_120['W'])/summary_120['W'])
-    num_guarantee.append(summary_120['W']-100 < 0)
-    num_tie_in.append(sum(summary['tie_in']))
+    summary_print = CPPI(active_returns_saved, zcb_prices_saved, cppip)
 
-# Prints final results
+    return MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print
+
+
+MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(active_returns_full, zcb_data, years, T, cppip=CPPIParams(), summary_path=0)
 
 print("Final Results after 10 years:")
 print("Average MV Active: ", np.mean(MVA_120))
@@ -283,8 +286,7 @@ print("Average MV Reserve: ", np.mean(MVR_120))
 print("Average Total Wealth: ", np.mean(W_120))
 print("Average Return: ", np.mean(Return_120))
 print("Average number of tie-ins: ", np.mean(num_tie_in))
-print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_guarantee))
-# print(sum(contributions))
+#print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_guarantee))
 
 
 # active_returns = active_returns = active_returns_full[0:T]
@@ -293,14 +295,13 @@ print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_g
 
 # contributions = np.zeros(T+1) + 100
 
-summary_print = CPPI(active_returns, zcb_prices, CPPIParams)
 
 
 Guarantee = summary_print['Guarantee']
 Floor = summary_print['Floor']
 Wealth = summary_print['W']
 
-print(summary_print)
+#print(summary_print)
 
 plt.plot(summary_print['month'], Wealth, label='Wealth', color = 'red')
 plt.plot(summary_print['month'], Floor, label='Floor', color = 'blue')
@@ -309,7 +310,38 @@ plt.xlabel('Month')
 plt.ylabel('Amount')
 plt.title('CPPI Wealth and Guarantee over Time')
 plt.legend()
-plt.show()
+#plt.show()
+
+L_target = [1.3, 1.4]
+L_trigger = [1.4, 1.75, 2]
+m_values = [1, 2, 3, 4]
+
+rows = []
+
+for m_val in m_values:
+    for L_t in L_target:
+        for L_tr in L_trigger:
+                cppip = CPPIParams(m = m_val, L_target = L_t, L_trigger = L_tr)
+                MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(active_returns_full, zcb_data, years, T, cppip=cppip, summary_path=0)
+                rows.append({
+                    "m": m_val,
+                    "L_target": L_t,
+                    "L_trigger": L_tr,
+                    "Avg Guarantee": np.mean(guarantee),
+                    "Minimum guarantee": np.min(guarantee),
+                    "Avg Total Wealth": np.mean(W_120),
+                    "Avg Return": np.mean(Return_120)
+                })
+
+table = pd.DataFrame(rows, columns=[
+    'm', 'L_target', 'L_trigger', 'Avg Guarantee', 'Minimum guarantee', 'Avg Total Wealth', 'Avg Return'
+])
+print(table)
+
+
+
+
+
 
 
 # # ------- Loop for different starting times -------

@@ -312,9 +312,11 @@ plt.title('CPPI Wealth and Guarantee over Time')
 plt.legend()
 #plt.show()
 
-L_target = [1.3, 1.4]
-L_trigger = [1.4, 1.75, 2]
-m_values = [1, 2, 3, 4]
+
+# ---- Loop for different m with initial L_target and L_trigger ----
+L_target = [1.25]
+L_trigger = [1.3]
+m_values = [1, 2, 3, 4, 5, 6]
 
 rows = []
 
@@ -325,20 +327,50 @@ for m_val in m_values:
                 MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(active_returns_full, zcb_data, years, T, cppip=cppip, summary_path=0)
                 rows.append({
                     "m": m_val,
-                    "L_target": L_t,
-                    "L_trigger": L_tr,
+                    # "L_target": L_t,
+                    # "L_trigger": L_tr,
                     "Avg Guarantee": np.mean(guarantee),
                     "Minimum guarantee": np.min(guarantee),
-                    "Avg Total Wealth": np.mean(W_120),
-                    "Avg Return": np.mean(Return_120)
+                    "Minimum Wealth": np.min(W_120),
+                    "Avg Return": np.mean(Return_120),
+                    # "Min Return": np.min(Return_120)
                 })
 
 table = pd.DataFrame(rows, columns=[
-    'm', 'L_target', 'L_trigger', 'Avg Guarantee', 'Minimum guarantee', 'Avg Total Wealth', 'Avg Return'
+    'm', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
 ])
 print(table)
 
 
+
+# ---- Another loop with different L_target and L_trigger ----
+print("--------------------------------")
+L_target = [1.25, 1.35, 1.5]
+L_trigger = [[1.3, 1.5, 2], [1.5, 2], [2]]
+m_values = [2,3]
+
+rows = []
+
+for m_val in m_values:
+    for i, L_t in enumerate(L_target):
+        for L_tr in L_trigger[i]:
+                cppip = CPPIParams(m = m_val, L_target = L_t, L_trigger = L_tr)
+                MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(active_returns_full, zcb_data, years, T, cppip=cppip, summary_path=0)
+                rows.append({
+                    "m": m_val,
+                    "L_target": L_t,
+                    "L_trigger": L_tr,
+                    "Avg Guarantee": np.mean(guarantee),
+                    "Minimum guarantee": np.min(guarantee),
+                    "Minimum Wealth": np.min(W_120),
+                    "Avg Return": np.mean(Return_120),
+                    # "Min Return": np.min(Return_120)
+                })
+
+table = pd.DataFrame(rows, columns=[
+    'm', 'L_target', 'L_trigger', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
+])
+print(table)
 
 
 

@@ -13,12 +13,12 @@ from markowitz import markowitz_historical
 
 @dataclass
 class CPPIParams:
-    m: float = 1             # CPPI multiplier (>=1)
+    m: float = 3             # CPPI multiplier (>=1)
     b: float = 1.0           # max leverage ratio (keep at 1.0 for "no leverage")
     W0: float = 100        # initial wealth
-    F0: float = 80         # initial floor in currency (e.g., 80 for 80/20 split)
-    F_target: float = 1.25   # target funded ratio
-    F_trigger: float = 1.3  # trigger funded ratio for tie-in
+    L_target: float = 1.5   # target funded ratio
+    L_trigger: float = 2  # trigger funded ratio for tie-in
+    # F0: float = 80 (W0 / L_target)         # initial floor in currency (e.g., 80 for 80/20 split)
 
 
 def CPPI(
@@ -43,7 +43,7 @@ def CPPI(
     m = cppip.m
     b = cppip.b
     W0 = cppip.W0
-    F0 = cppip.F0
+    F0 = W0 / cppip.L_target          # initial floor in currency
 
 
     # Starting values for price processes
@@ -55,10 +55,11 @@ def CPPI(
     # Initial allocation proportions
     eta_A = E0 / A                               # units of active
     eta_R = (W0 - E0)/R                          # units of ZCB
+    F = F0
 
     # Initial guarantee units N0 from floor and current ZCB price
-    N = F0 / R
-    # F = N * R
+    # N = F0 * R
+    # F = F0
 
     # Floor_ratio = W0/F0                          
 
@@ -73,10 +74,11 @@ def CPPI(
         "W": eta_A*A + eta_R*R,
         "Floor": F0,
         "Cushion": cushion,
-        "Guarantee": N,
+        "Guarantee": F0 / R,
         "P": R,
+        "E": E0,
         "L": (eta_A * A + eta_R * R) / F0,           # Her genbruger vi konceptet med funded ratio
-        "tie_in": False,                            # Vi kalder den tie-in hvis vi ændrer floor
+        "tie_in": False,                             # Vi kalder den tie-in hvis vi ændrer floor
     })
 
     # ---- Iterate months 1 to T ----
@@ -84,12 +86,12 @@ def CPPI(
         # New market values
         A = (1+ active_returns[t-1]) * A
         R = zcb_prices[t]
-        F = N * R
+        # F = F * R
         # Evolve holdings to new market values before contributions
         # W_pre = eta_A * A + eta_R * R
-        # F_pre = N * R
+        # L_pre = N * R
 
-        # cushion_pre = max(W_pre - F_pre, 0)
+        # cushion_pre = max(W_pre - L_pre, 0)
 
         # Exposure
         # E_pre = min(m * cushion_pre, b * W_pre)
@@ -98,21 +100,21 @@ def CPPI(
         # eta_R_pre = (W_pre - E_pre) / R
 
         # funded ratio before contributions for tie-in logic
-        # L_pre = (W_pre / F_pre)
+        # L_pre = (W_pre / L_pre)
 
         # HER SKAL VI ALTSÅ LIGE OVERVEJE MICHAELS MAIL:
         # FLOOR ÆNDRER SIG EFTER AKTIVER, MEN VI INDBETALER EFTER TARGTET????
         # C = contributions[t]        
-        # c_R = C / cppip.F_target
+        # c_R = C / cppip.L_target
         # c_A = C - c_R
 
         # 5) Update active and reserve with contributions
         W = eta_A * A + eta_R * R
+        F = F * zcb_prices[t] / zcb_prices[t-1]
         cushion = max(W - F, 0)
-        E = min(m * cushion, b * W)
+        E = max(0.0, min(m * cushion, b * W))
         eta_A = E / A
-        # eta_A = E / A
-        # eta_R = W - E / R
+        eta_R = (W - E) / R
 
         # Keep N == eta_R so floor follows reserve and doesn’t “run away”
         #N = eta_R
@@ -122,21 +124,26 @@ def CPPI(
         MV_R = eta_R * R
         W = MV_A + MV_R
 
-        F = N * R
         L = W / F         # Floor ratio
 
 
-        tie_in = (L > cppip.F_trigger)
+        tie_in = (L > cppip.L_trigger)
 
         if tie_in:
             # enforce target funded ratio by lifting the floor (i.e., moving more into reserve)
-            # W_pre / (F_target) = reserve after tie-in
-            MV_R_target = W / cppip.F_target
-            eta_R = MV_R_target / R
-            eta_A = (W - MV_R_target) / A
-            N = eta_R
-        
-        
+            # W_pre / (L_target) = reserve after tie-in
+            # MV_R_target = W / cppip.L_target
+            # eta_R = MV_R_target / R
+            # eta_A = (W - MV_R_target) / A
+            # N = eta_R
+            F = W / cppip.L_target
+            L = cppip.L_target
+            cushion = max(W - F, 0)
+            E = max(0.0, min(m * cushion, b * W))
+            eta_A = E / A
+            eta_R = (W - E) / R
+            MV_A = eta_A * A
+            MV_R = eta_R * R
 
 
         # Save ------ HAR SLETTET CONTRIBUTIONS OG L_PRE FRA OUTPUT
@@ -148,14 +155,15 @@ def CPPI(
             "W": W,
             "Floor": F,
             "Cushion": max(W - F, 0.0),
-            "Guarantee": N,
+            "Guarantee":F / R,
             "P": R,
+            "E": E,
             "L": L,
             "tie_in": tie_in,
         })
 
     history = pd.DataFrame(rows, columns=[
-        'month', 'A', 'MV_A', 'MV_R', 'Guarantee', 'P', 'W', 'Floor', 'L', 'tie_in'
+        'month', 'A', 'MV_A', 'MV_R', 'Guarantee', 'P', 'W', 'Floor', 'E', 'L', 'tie_in'
     ])
     return history
 
@@ -202,18 +210,18 @@ if allow_short:
     US_data = pd.read_csv("csv_files/EXPORT US EUR.csv")
 
 ## Markowitz
-n_points = 10
+n_points = 50
 strategy = "tangent"
 mu_target = 0.01
 
-eu_factors = ["RM_RF", "MOM"]
+eu_factors = ["SMB", "MOM"]
 us_factors = ["RM_RF", "SMB", "MOM"]
 
 ## Risk parity
 if market == "both": include_market2 = True
 if market == "EU": include_market2 = False
 
-has_MOM1, has_SMB1, has_RM_RF1 = True, False, True
+has_MOM1, has_SMB1, has_RM_RF1 = True, True, False
 has_MOM2, has_SMB2, has_RM_RF2 = True, True, True
 has_MOM2, has_SMB2, has_RM_RF2 = include_market2, include_market2, include_market2
 use_covariance = False
@@ -235,39 +243,42 @@ if portfolio_strategy == "risk_parity":
     active_returns_full = np.array(active_returns_full['return'])/100
 
 
+def path_simulator(active_returns_full, zcb_data, years, T, cppip=CPPIParams(), summary_path = 0):
+    # --- Simulate multiple paths and collect results ---
+    MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee = [], [], [], [], [], []
 
-# --- Simulate multiple paths and collect results ---
-MVA_120, MVR_120, W_120, Return_120, num_tie_in, num_guarantee = [], [], [], [], [], []
+    # forskellige perioder i linjerne under (første og sidste):
+    # for i in range(0, 120):
+    for i in range(len(active_returns_full)-120):
+        
+        zcb_prices = zcb_price_generator(years, T + 1, start = i, data = zcb_data)
+        active_returns = active_returns_full[i:T+i]
 
-# forskellige perioder i linjerne under (første og sidste):
-# for i in range(len(active_returns_full)):
-for i in range(len(active_returns_full)-120):
-    
-    zcb_prices = zcb_price_generator(years, T + 1, start = i, data = zcb_data)
-    active_returns = active_returns_full[i:T+i]
-    # if i == 25:
-    #     active_returns = np.random.normal(loc= 0 , scale= 0.02, size=T)
-    
-    # if i == 30:
-    #     active_returns = np.random.normal(loc= -0.03 , scale= 0.02, size=T)
+        # Sanity checks
+        assert active_returns.shape == (T ,)
+        assert zcb_prices.shape == (T + 1,)
 
-    # Sanity checks
-    assert active_returns.shape == (T,)
-    assert zcb_prices.shape == (T + 1,)
+        summary = CPPI(active_returns, zcb_prices, cppip)
 
-    summary = CPPI(active_returns, zcb_prices)
+        summary_120 = summary.iloc[T,:]
 
-    summary_120 = summary.iloc[T,:]
+        # Add observations to results:
+        MVA_120.append(summary_120['MV_A'])
+        MVR_120.append(summary_120['MV_R'])
+        W_120.append(summary_120['W'])
+        Return_120.append((summary_120['W'])/100 - 1.0)
+        guarantee.append(summary_120['Guarantee'])
+        num_tie_in.append(sum(summary['tie_in']))
+        if i == summary_path:
+            active_returns_saved = active_returns
+            zcb_prices_saved = zcb_prices
 
-    # Add observations to results:
-    MVA_120.append(summary_120['MV_A'])
-    MVR_120.append(summary_120['MV_R'])
-    W_120.append(summary_120['W'])
-    Return_120.append((summary_120['W'])/summary_120['W'])
-    num_guarantee.append(summary_120['W']-100 < 0)
-    num_tie_in.append(sum(summary['tie_in']))
+    summary_print = CPPI(active_returns_saved, zcb_prices_saved, cppip)
 
-# Prints final results
+    return MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print
+
+
+MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(active_returns_full, zcb_data, years, T, cppip=CPPIParams(), summary_path=0)
 
 print("Final Results after 10 years:")
 print("Average MV Active: ", np.mean(MVA_120))
@@ -275,16 +286,7 @@ print("Average MV Reserve: ", np.mean(MVR_120))
 print("Average Total Wealth: ", np.mean(W_120))
 print("Average Return: ", np.mean(Return_120))
 print("Average number of tie-ins: ", np.mean(num_tie_in))
-print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_guarantee))
-# print(sum(contributions))
-
-class CPPIParams:
-    m: float = 1             # CPPI multiplier (>=1)
-    b: float = 1.0           # max leverage ratio (keep at 1.0 for "no leverage")
-    W0: float = 100.0        # initial wealth
-    F0: float = 80.0         # initial floor in currency (e.g., 80 for 80/20 split)
-    F_target: float = 1.25     # target funded ratio
-    F_trigger: float = 1.3  # trigger funded ratio for tie-in
+#print("Number of paths with guarantee shortfall: ", sum(num_guarantee)/len(num_guarantee))
 
 
 # active_returns = active_returns = active_returns_full[0:T]
@@ -293,113 +295,175 @@ class CPPIParams:
 
 # contributions = np.zeros(T+1) + 100
 
-summary_print = CPPI(active_returns, zcb_prices, CPPIParams)
 
 
-# Guarantee = summary_print['Guarantee']
-# Floor = summary_print['Floor']
-# Wealth = summary_print['W']
+Guarantee = summary_print['Guarantee']
+Floor = summary_print['Floor']
+Wealth = summary_print['W']
 
-# print(summary_print)
+#print(summary_print)
 
-# plt.plot(summary_print['month'], Wealth, label='Wealth', color = 'red')
-# plt.plot(summary_print['month'], Floor, label='Floor', color = 'blue')
-# plt.plot(summary_print['month'], Guarantee, label='Guarantee', color = 'green')
-# plt.xlabel('Month')
-# plt.ylabel('Amount')
-# plt.title('CPPI Wealth and Guarantee over Time')
+plt.plot(summary_print['month'], Wealth, label='Wealth', color = 'red')
+plt.plot(summary_print['month'], Floor, label='Floor', color = 'blue')
+plt.plot(summary_print['month'], Guarantee, label='Guarantee', color = 'green')
+plt.xlabel('Month')
+plt.ylabel('Amount')
+plt.title('CPPI Wealth and Guarantee over Time')
+plt.legend()
+#plt.show()
+
+
+# ---- Loop for different m with initial L_target and L_trigger ----
+L_target = [1.25]
+L_trigger = [1.3]
+m_values = [1, 2, 3, 4, 5, 6]
+
+rows = []
+
+for m_val in m_values:
+    for L_t in L_target:
+        for L_tr in L_trigger:
+                cppip = CPPIParams(m = m_val, L_target = L_t, L_trigger = L_tr)
+                MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(active_returns_full, zcb_data, years, T, cppip=cppip, summary_path=0)
+                rows.append({
+                    "m": m_val,
+                    # "L_target": L_t,
+                    # "L_trigger": L_tr,
+                    "Avg Guarantee": np.mean(guarantee),
+                    "Minimum guarantee": np.min(guarantee),
+                    "Minimum Wealth": np.min(W_120),
+                    "Avg Return": np.mean(Return_120),
+                    # "Min Return": np.min(Return_120)
+                })
+
+table = pd.DataFrame(rows, columns=[
+    'm', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
+])
+print(table)
+
+
+
+# ---- Another loop with different L_target and L_trigger ----
+print("--------------------------------")
+L_target = [1.25, 1.35, 1.5]
+L_trigger = [[1.3, 1.5, 2], [1.5, 2], [2]]
+m_values = [2,3]
+
+rows = []
+
+for m_val in m_values:
+    for i, L_t in enumerate(L_target):
+        for L_tr in L_trigger[i]:
+                cppip = CPPIParams(m = m_val, L_target = L_t, L_trigger = L_tr)
+                MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(active_returns_full, zcb_data, years, T, cppip=cppip, summary_path=0)
+                rows.append({
+                    "m": m_val,
+                    "L_target": L_t,
+                    "L_trigger": L_tr,
+                    "Avg Guarantee": np.mean(guarantee),
+                    "Minimum guarantee": np.min(guarantee),
+                    "Minimum Wealth": np.min(W_120),
+                    "Avg Return": np.mean(Return_120),
+                    # "Min Return": np.min(Return_120)
+                })
+
+table = pd.DataFrame(rows, columns=[
+    'm', 'L_target', 'L_trigger', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
+])
+print(table)
+
+
+
+
+
+# # ------- Loop for different starting times -------
+# T = 120  # horizon in months
+# n_paths = len(active_returns_full) - T + 1
+# if n_paths <= 0:
+#     raise ValueError("Not enough data to form at least one 120-month path.")
+
+# # Collectors
+# MVA_120, MVR_120, W_120, G_120 = [], [], [], []
+# RET_120 = []            # total return over the 120-month path (relative to 100 initial wealth)
+# NUM_GUARANTEE_BREACH = []  # whether terminal wealth < 100
+# NUM_TIE_IN = []            # number of months flagged as tie_in along each path
+
+# for start in range(n_paths):
+#     # Slice a 120-month window starting at `start`
+#     active_returns = active_returns_full[start : start + T]          # shape (T,)
+#     zcb_prices = zcb_price_generator(years, T + 1, start=start, data=zcb_data)  # shape (T+1,)
+
+#     # Sanity checks
+#     assert active_returns.shape == (T,)
+#     assert zcb_prices.shape == (T + 1,)
+
+#     # Run CPPI over this 120-month window
+#     summary = CPPI(active_returns, zcb_prices)
+
+#     # Terminal row is index T because you have T steps and T+1 rows (including month 0)
+#     summary_120 = summary.iloc[T, :]
+
+#     # Collect terminal metrics
+#     MVA_120.append(summary_120['MV_A'])
+#     MVR_120.append(summary_120['MV_R'])
+#     W_120.append(summary_120['W'])
+#     G_120.append(summary_120['Guarantee'])
+
+#     # Return over the path relative to initial (assumed 100). Your old code had W/W == 1.0.
+#     RET_120.append(summary_120['W'] / 100.0 - 1.0)
+
+#     # guarantee breach (terminal wealth below initial 100)
+#     NUM_GUARANTEE_BREACH.append(summary_120['W'] < 100)
+
+#     # count of tie-in months in this path
+#     NUM_TIE_IN.append(int(summary['tie_in'].sum()))
+
+# # ---- Make histograms of terminal values across starting months ----
+# df_terminal = pd.DataFrame({
+#     "terminal_wealth": W_120,
+#     "terminal_guarantee": G_120,
+#     "terminal_return": RET_120,
+#     "mv_a": MVA_120,
+#     "mv_r": MVR_120,
+#     "tie_in_months": NUM_TIE_IN,
+#     "breach": NUM_GUARANTEE_BREACH,
+# })
+
+# # 1) Terminal Wealth
+# plt.figure()
+# df_terminal["terminal_wealth"].hist(bins=30)
+# plt.xlabel("Terminal Wealth")
+# plt.ylabel("Frequency")
+# plt.title("Terminal Wealth (120m) across starting months")
+# w_mean = df_terminal["terminal_wealth"].mean()
+# w_med  = df_terminal["terminal_wealth"].median()
+# plt.axvline(w_mean, linestyle="--", linewidth=1, label=f"Mean={w_mean:,.2f}")
+# plt.axvline(w_med,  linestyle=":",  linewidth=1, label=f"Median={w_med:,.2f}")
 # plt.legend()
 # plt.show()
 
+# # 2) Terminal Guarantee
+# plt.figure()
+# df_terminal["terminal_guarantee"].hist(bins=30)
+# plt.xlabel("Terminal Guarantee")
+# plt.ylabel("Frequency")
+# plt.title("Terminal Guarantee (120m) across starting months")
+# g_mean = df_terminal["terminal_guarantee"].mean()
+# g_med  = df_terminal["terminal_guarantee"].median()
+# plt.axvline(g_mean, linestyle="--", linewidth=1, label=f"Mean={g_mean:,.2f}")
+# plt.axvline(g_med,  linestyle=":",  linewidth=1, label=f"Median={g_med:,.2f}")
+# plt.legend()
+# plt.show()
 
-# ------- Loop for different starting times -------
-T = 120  # horizon in months
-n_paths = len(active_returns_full) - T + 1
-if n_paths <= 0:
-    raise ValueError("Not enough data to form at least one 120-month path.")
-
-# Collectors
-MVA_120, MVR_120, W_120, G_120 = [], [], [], []
-RET_120 = []            # total return over the 120-month path (relative to 100 initial wealth)
-NUM_GUARANTEE_BREACH = []  # whether terminal wealth < 100
-NUM_TIE_IN = []            # number of months flagged as tie_in along each path
-
-for start in range(n_paths):
-    # Slice a 120-month window starting at `start`
-    active_returns = active_returns_full[start : start + T]          # shape (T,)
-    zcb_prices = zcb_price_generator(years, T + 1, start=start, data=zcb_data)  # shape (T+1,)
-
-    # Sanity checks
-    assert active_returns.shape == (T,)
-    assert zcb_prices.shape == (T + 1,)
-
-    # Run CPPI over this 120-month window
-    summary = CPPI(active_returns, zcb_prices)
-
-    # Terminal row is index T because you have T steps and T+1 rows (including month 0)
-    summary_120 = summary.iloc[T, :]
-
-    # Collect terminal metrics
-    MVA_120.append(summary_120['MV_A'])
-    MVR_120.append(summary_120['MV_R'])
-    W_120.append(summary_120['W'])
-    G_120.append(summary_120['Guarantee'])
-
-    # Return over the path relative to initial (assumed 100). Your old code had W/W == 1.0.
-    RET_120.append(summary_120['W'] / 100.0 - 1.0)
-
-    # guarantee breach (terminal wealth below initial 100)
-    NUM_GUARANTEE_BREACH.append(summary_120['W'] < 100)
-
-    # count of tie-in months in this path
-    NUM_TIE_IN.append(int(summary['tie_in'].sum()))
-
-# ---- Make histograms of terminal values across starting months ----
-df_terminal = pd.DataFrame({
-    "terminal_wealth": W_120,
-    "terminal_guarantee": G_120,
-    "terminal_return": RET_120,
-    "mv_a": MVA_120,
-    "mv_r": MVR_120,
-    "tie_in_months": NUM_TIE_IN,
-    "breach": NUM_GUARANTEE_BREACH,
-})
-
-# 1) Terminal Wealth
-plt.figure()
-df_terminal["terminal_wealth"].hist(bins=30)
-plt.xlabel("Terminal Wealth")
-plt.ylabel("Frequency")
-plt.title("Terminal Wealth (120m) across starting months")
-w_mean = df_terminal["terminal_wealth"].mean()
-w_med  = df_terminal["terminal_wealth"].median()
-plt.axvline(w_mean, linestyle="--", linewidth=1, label=f"Mean={w_mean:,.2f}")
-plt.axvline(w_med,  linestyle=":",  linewidth=1, label=f"Median={w_med:,.2f}")
-plt.legend()
-plt.show()
-
-# 2) Terminal Guarantee
-plt.figure()
-df_terminal["terminal_guarantee"].hist(bins=30)
-plt.xlabel("Terminal Guarantee")
-plt.ylabel("Frequency")
-plt.title("Terminal Guarantee (120m) across starting months")
-g_mean = df_terminal["terminal_guarantee"].mean()
-g_med  = df_terminal["terminal_guarantee"].median()
-plt.axvline(g_mean, linestyle="--", linewidth=1, label=f"Mean={g_mean:,.2f}")
-plt.axvline(g_med,  linestyle=":",  linewidth=1, label=f"Median={g_med:,.2f}")
-plt.legend()
-plt.show()
-
-# 3) (Optional) Terminal Return or Funded Ratio
-plt.figure()
-df_terminal["terminal_return"].hist(bins=30)
-plt.xlabel("Terminal Return over 120m (relative to 100)")
-plt.ylabel("Frequency")
-plt.title("Terminal Return (120m) across starting months")
-r_mean = df_terminal["terminal_return"].mean()
-r_med  = df_terminal["terminal_return"].median()
-plt.axvline(r_mean, linestyle="--", linewidth=1, label=f"Mean={r_mean:.2%}")
-plt.axvline(r_med,  linestyle=":",  linewidth=1, label=f"Median={r_med:.2%}")
-plt.legend()
-plt.show()
+# # 3) (Optional) Terminal Return or Funded Ratio
+# plt.figure()
+# df_terminal["terminal_return"].hist(bins=30)
+# plt.xlabel("Terminal Return over 120m (relative to 100)")
+# plt.ylabel("Frequency")
+# plt.title("Terminal Return (120m) across starting months")
+# r_mean = df_terminal["terminal_return"].mean()
+# r_med  = df_terminal["terminal_return"].median()
+# plt.axvline(r_mean, linestyle="--", linewidth=1, label=f"Mean={r_mean:.2%}")
+# plt.axvline(r_med,  linestyle=":",  linewidth=1, label=f"Median={r_med:.2%}")
+# plt.legend()
+# plt.show()

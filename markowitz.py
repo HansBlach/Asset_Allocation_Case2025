@@ -41,9 +41,6 @@ def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min", allo
 
     bound = [(0, 1)] * len(mean_return) # Ensures no shorting is allowed
 
-    if allow_short:
-        bound = [(-5, 5)] * len(mean_return)
-
     if direction == "min":
         cons = [{'type': 'eq', 'fun': weights_sum_constr},
                 {'type': 'eq', 'fun': markowitz_min_constraint, 'args': (mean_return, target)}]
@@ -63,7 +60,19 @@ def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min", allo
 
 # function that finds the empirical minimum variance frontier:
 
-def efficient_frontier(mean_return, cov_matrix, n_points=150, allow_short = False):
+def efficient_frontier(eu_data, us_data, eu_factors, us_factors, n_points=150, allow_short = False):
+    eu = eu_data[eu_factors]
+    # prefix EU_ to each column name to avoid duplicates
+    eu.columns = ["EU_" + col for col in eu.columns]
+    us = us_data[us_factors]
+    # prefix US_ to each column name to avoid duplicates
+    us.columns = ["US_" + col for col in us.columns]
+
+    data = pd.concat([eu, us], axis = 1)
+
+    mean_return = data.mean().to_numpy()
+    cov_matrix = data.cov().to_numpy()
+
     mu_min, mu_max = mean_return.min(), mean_return.max()
 
     target_returns = np.linspace(mu_min, mu_max, n_points)
@@ -117,21 +126,11 @@ def frontier_plotter(risks, returns):
     #plt.show()
 
 
-us_factors, eu_factors = ["RM_RF", "MOM"], ["RM_RF", "MOM", "SMB"]
+us_factors, eu_factors = ["RM_RF", "MOM", "SMB"], ["RM_RF", "MOM"]
 
-eu = EU_data[eu_factors]
-# prefix EU_ to each column name to avoid duplicates
-eu.columns = ["EU_" + col for col in eu.columns]
-us = US_data[us_factors]
-# prefix US_ to each column name to avoid duplicates
-us.columns = ["US_" + col for col in us.columns]
 
-data = pd.concat([eu, us], axis = 1)
 
-mean_return = data.mean().to_numpy()
-cov_matrix = data.cov().to_numpy()
-
-variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points=150)
+# variance, returns, weights = efficient_frontier(EU_data, US_data, eu_factors, us_factors, n_points=50, allow_short = True)
 
 # frontier_plotter(variance, returns)
 
@@ -153,7 +152,7 @@ def markowitz_strategy(eu_data, us_data, eu_factors,us_factors, mu_target = 0.5,
     cov_matrix = data.cov().to_numpy()
 
     if strategy == "tangent":
-        variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points, allow_short= allow_short)
+        variance, returns, weights = efficient_frontier(eu_data, us_data, eu_factors,us_factors, n_points, allow_short= allow_short)
         
         # Check if we got valid results
         if len(variance) == 0:
@@ -161,14 +160,14 @@ def markowitz_strategy(eu_data, us_data, eu_factors,us_factors, mu_target = 0.5,
             return np.ones(len(mean_return)) / len(mean_return)
 
         # Avoid division by zero
-        sharpe = np.divide(returns, variance, out=np.zeros_like(returns), where=variance!=0)
+        sharpe = np.divide(returns, np.sqrt(variance), out=np.zeros_like(returns), where=variance!=0)
 
         idx_tangent = np.argmax(sharpe)
 
         return(weights[idx_tangent])
     
     if strategy == "min_variance":
-        variance, returns, weights = efficient_frontier(mean_return, cov_matrix, n_points, allow_short= allow_short)
+        variance, returns, weights = efficient_frontier(eu_data, us_data, eu_factors,us_factors, n_points, allow_short= allow_short)
         
         # Check if we got valid results
         if len(variance) == 0:
@@ -231,11 +230,18 @@ def markowitz_historical(eu_data, us_data, eu_factors, us_factors, window, strat
 
     actual_return = np.zeros(N - window)
 
+    market_cols = [i for i, nm in enumerate(data.columns) if nm.endswith("RM_RF")]
+
     for i in range(N - window):
         weights = markowitz_strategy(rolling_data_eu[i], rolling_data_us[i], eu_factors, us_factors, mu_target, n_points, strategy, allow_short)
+        risk_free_weight = 0
+        if allow_short:
+            if sum(weights[market_cols]) < 1:
+                #print(mu, sum(w[market_cols]))
+                risk_free_weight = 1 - sum(weights[market_cols])
         next_per_return = np.array(data.iloc[window + i, :])
-        actual_return[i] = weights.T @ next_per_return
-    
+        actual_return[i] = weights.T @ next_per_return + risk_free_weight * rolling_data_eu[i].iloc[-1]['RF'] # long_short portfolios are free, so residual is invested in risk free
+
     return actual_return
 
 # Function to convert returns to value development

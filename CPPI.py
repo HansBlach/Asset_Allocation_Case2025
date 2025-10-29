@@ -333,11 +333,13 @@ for m_val in m_values:
                     "Minimum guarantee": np.min(guarantee),
                     "Minimum Wealth": np.min(W_120),
                     "Avg Return": np.mean(Return_120),
+                    "Std. Return": np.std(Return_120),
+                    "shortfall_rate": np.mean(np.array(W_120) < np.array(guarantee))
                     # "Min Return": np.min(Return_120)
                 })
 
 table = pd.DataFrame(rows, columns=[
-    'm', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
+    'm', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return', "shortfall_rate", "Std. Return"
 ])
 print(table)
 
@@ -364,14 +366,55 @@ for m_val in m_values:
                     "Minimum guarantee": np.min(guarantee),
                     "Minimum Wealth": np.min(W_120),
                     "Avg Return": np.mean(Return_120),
+                    "Std. Return": np.std(Return_120),
+                    "sharpe_ratio": (np.mean(Return_120)/np.std(Return_120))
                     # "Min Return": np.min(Return_120)
                 })
 
 table = pd.DataFrame(rows, columns=[
-    'm', 'L_target', 'L_trigger', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
-])
+    'm', 'L_target', 'L_trigger', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return', "Std. Return", "sharpe_ratio"])
 print(table)
 
+
+# cfgs = [
+#     {"label": "m=2, L_t=1.35, L_tr=1.5", "m": 2, "L_t": 1.35, "L_tr": 1.50},
+#     {"label": "m=3, L_t=1.25, L_tr=1.3", "m": 3, "L_t": 1.25, "L_tr": 1.30},
+# ]
+
+# results = {}
+
+# for cfg in cfgs:
+#     cppip = CPPIParams(m=cfg["m"], L_target=cfg["L_t"], L_trigger=cfg["L_tr"])
+#     MVA_120, MVR_120, W_120, Return_120, num_tie_in, guarantee, summary_print = path_simulator(
+#         active_returns_full, zcb_data, years, T, cppip=cppip, summary_path=0
+#     )
+#     results[cfg["label"]] = {
+#         "guarantee": np.asarray(guarantee),
+#         "return":    np.asarray(Return_120),
+#         "shortfall_count": sum(np.asarray(guarantee) < Return_120),
+#     }
+
+# # --- plot: overlayed histograms for the two configs ---
+# fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+# # Guarantees
+# for label, res in results.items():
+#     axes[0].hist(res["shortfall_count"], bins=40, alpha=0.5, label=label, density=False)
+# axes[0].set_title("Guarantee after 10 years")
+# axes[0].set_xlabel("Shortfall Count")
+# axes[0].set_ylabel("Frequency")
+# axes[0].legend()
+
+# # Returns
+# for label, res in results.items():
+#     axes[1].hist(res["return"], bins=40, alpha=0.5, label=label, density=False)
+# axes[1].set_title("Return after 10 years")
+# axes[1].set_xlabel("Return")
+# axes[1].set_ylabel("Frequency")
+# axes[1].legend()
+
+# plt.tight_layout()
+# plt.show()
 
 
 

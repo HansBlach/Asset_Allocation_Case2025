@@ -504,10 +504,9 @@ def analyze_tie_in_strategies(strategy_1: str,
         ax.hist(res["MV_R"], bins=bins, alpha=0.45, density=True,
                 label=name, color=color_map[name], edgecolor='black')
         ax.axvline(np.mean(res["MV_R"]), color=color_map[name], linestyle="--", linewidth=2)
-    ax.set_title("Final Reserve Value (MV_R)")
+    ax.set_title("Guarantee")
     ax.set_xlabel("Value after 10 years")
     ax.set_ylabel("Density")
-    ax.legend()
     ax.grid(True, linestyle="--", alpha=0.6)
 
     # Wealth histogram
@@ -516,15 +515,10 @@ def analyze_tie_in_strategies(strategy_1: str,
         ax.hist(res["W"], bins=bins, alpha=0.45, density=True,
                 label=name, color=color_map[name], edgecolor='black')
         ax.axvline(np.mean(res["W"]), color=color_map[name], linestyle="--", linewidth=2)
-    ax.set_title("Final Total Wealth (W)")
+    ax.set_title("Wealth")
     ax.set_xlabel("Value after 10 years")
-    ax.legend()
     ax.grid(True, linestyle="--", alpha=0.6)
 
-    title = (f"Distribution of Final Outcomes — {strategy_1.capitalize()}"
-             if not strategy_2
-             else f"Distribution of Final Outcomes — {strategy_1.capitalize()} vs. {strategy_2.capitalize()}")
-    plt.suptitle(title, fontsize=14)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig("tie_in_histograms.png", dpi=300)
     plt.close()
@@ -550,11 +544,10 @@ def analyze_tie_in_strategies(strategy_1: str,
 
     plt.figure(figsize=(8,6))
     plt.plot(months, wealth, color="red", label="Wealth")
-    plt.plot(months, reserve, color="blue", label="Reserve (MV_R)")
-    plt.plot(months, guarantee, color="green", label="Guarantee (N)", linewidth=2)
+    plt.plot(months, reserve, color="blue", label="Reserve")
+    plt.plot(months, guarantee, color="green", label="Guarantee", linewidth=2)
     plt.scatter(months[tie_idx], guarantee[tie_idx],
                 color="green", edgecolor="black", zorder=5, s=60, label="Tie-in events")
-    plt.title(f"Tie-In Wealth and Guarantee Over Time ({strategy_1.capitalize()})")
     plt.xlabel("Month")
     plt.ylabel("Amount")
     plt.grid(True, linestyle="--", alpha=0.6)
@@ -562,51 +555,50 @@ def analyze_tie_in_strategies(strategy_1: str,
     plt.tight_layout()
     plt.savefig("tie_in_path_visualization.png", dpi=300)
     plt.close()
-
+    print(f"Path with most tie-ins for {strategy_1.capitalize()} starts at index {best_i} with {best_tieins} tie-ins.")
     # ---------------------------------------------------------
-    # SUMMARY TABLE
+    # SUMMARY TABLE (same format as LaTeX version)
     # ---------------------------------------------------------
     rows = []
     for name, res in results.items():
         MV_R, W, tieins = res["MV_R"], res["W"], res["tieins"]
-        mean_G = np.mean(MV_R)
-        mean_W = np.mean(W)
+        avg_G = np.mean(MV_R)
+        min_G = np.min(MV_R)
+        std_G = np.std(MV_R)
+        avg_W = np.mean(W)
+        std_W = np.std(W)
         avg_T = np.mean(tieins)
-        vol_W = np.std(W)
-        SR_W = (mean_W - 100) / vol_W if vol_W != 0 else np.nan
-        min_N = np.min(MV_R)
 
         rows.append({
             "Strategy": name,
-            "m(G)": round(mean_G),
-            "m(W)": round(mean_W),
-            "m(Tie-Ins)": round(avg_T, 2),
-            "V(W)": round(vol_W, 2),
-            "SR(W)": round(SR_W, 2),
-            "min(N)": round(min_N)
+            "Avg(G)": round(avg_G, 4),
+            "Min(G)": round(min_G, 4),
+            "Std(G)": round(std_G, 4),
+            "Avg(W)": round(avg_W, 4),
+            "Std(W)": round(std_W, 4),
+            "Avg(Tie-ins)": round(avg_T, 4)
         })
 
     summary_df = pd.DataFrame(rows)
-    latex_caption = (f"Summary of Tie-In Outcomes for {strategy_1.capitalize()} (10-Year Horizon)"
-                     if not strategy_2
-                     else f"Summary of Tie-In Outcomes ({strategy_1.capitalize()} vs. {strategy_2.capitalize()}, 10-Year Horizon)")
+
+    latex_caption = (f"Results by leverage multiplier $m$ for {strategy_1.capitalize()}"
+                    if not strategy_2
+                    else f"Results by leverage multiplier $m$ ({strategy_1.capitalize()} vs. {strategy_2.capitalize()})")
 
     latex_table = summary_df.to_latex(
         index=False,
         caption=latex_caption,
-        label="tab:tie_in_summary",
-        column_format="lrrrrrr",
+        label="tab:guarantee_results_L",
+        column_format="lccccccc",
         escape=False
     )
 
-    filename = f"tie_in_summary_{strategy_1.lower()}" + (f"_vs_{strategy_2.lower()}" if strategy_2 else "") + ".tex"
+    filename = f"tie_in_statistics_{strategy_1.lower()}" + (f"_vs_{strategy_2.lower()}" if strategy_2 else "") + ".tex"
     with open(filename, "w") as f:
         f.write(latex_table)
 
     print("\n✅ Outputs saved:")
-    print(" - tie_in_histograms.png")
-    print(" - tie_in_path_visualization.png")
-    print(f" - {filename}\n")
+    print(f" - {filename}")
     print(summary_df)
     print("\nLaTeX Table:\n", latex_table)
 
@@ -634,4 +626,100 @@ analyze_tie_in_strategies(
     eu_factors=["RM_RF", "MOM"],
     us_factors=["RM_RF", "MOM", "SMB"],
     cfg=cfg
+)
+
+import matplotlib.dates as mdates
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ---- Tie-in simulator (parallel to CPPI path_simulator) ----
+def tie_in_path_simulator(active_returns_full, zcb_data, years, T, cfg=TieInConfig(), summary_path=0):
+    """Simulate rolling 10-year tie-in paths and return final stats."""
+    MV_A_120, MV_R_120, W_120, Return_120, guarantee, num_tie_in = [], [], [], [], [], []
+
+    for i in range(len(active_returns_full) - T):
+        zcb_prices = zcb_price_generator(years, T + 1, start=i, data=zcb_data)
+        active_returns = active_returns_full[i:T+i]
+
+        assert active_returns.shape == (T,), "active_returns wrong length"
+        assert zcb_prices.shape == (T + 1,), "zcb_prices wrong length"
+
+        summary = simulate_tie_in_path(active_returns, zcb_prices, cfg=cfg)
+        summary_120 = summary.iloc[T, :]
+
+        MV_A_120.append(summary_120["MV_A"])
+        MV_R_120.append(summary_120["MV_R"])
+        W_120.append(summary_120["W"])
+        Return_120.append(summary_120["W"] / 100 - 1.0)
+        guarantee.append(summary_120["N"])  # final guarantee = face value N
+        num_tie_in.append(sum(summary["tie_in"]))
+
+        if i == summary_path:
+            active_returns_saved = active_returns
+            zcb_prices_saved = zcb_prices
+
+    summary_print = simulate_tie_in_path(active_returns_saved, zcb_prices_saved, cfg=cfg)
+    return MV_A_120, MV_R_120, W_120, Return_120, num_tie_in, guarantee, summary_print
+
+
+# ---- Tie-in path visualization (same start-index logic as CPPI) ----
+def plot_tie_in_path(
+    active_returns_full: np.ndarray,
+    zcb_data: pd.DataFrame,
+    years: int,
+    T: int,
+    cfg: TieInConfig,
+    start_index: int,
+    save_path: str = "tie_in_path_visualization.png",
+):
+    """Plots Wealth, Reserve, and Guarantee over time for a single tie-in path with calendar year x-axis."""
+    zcb_prices = zcb_price_generator(years, T + 1, start=start_index, data=zcb_data)
+    active_returns = active_returns_full[start_index:start_index + T]
+
+    summary = simulate_tie_in_path(active_returns, zcb_prices, cfg=cfg)
+
+    # --- Create date index ---
+    start_date = pd.Timestamp("2007-08-01") + pd.DateOffset(months=start_index)
+    dates = pd.date_range(start=start_date, periods=len(summary), freq="M")
+
+    wealth = summary["W"].to_numpy()
+    reserve = summary["MV_R"].to_numpy()
+    guarantee = summary["N"].to_numpy()
+    tie_idx = summary.index[summary["tie_in"]]
+
+    fig, ax = plt.subplots(figsize=(8,6))
+    ax.plot(dates, wealth, color="red", label="Wealth")
+    ax.plot(dates, reserve, color="blue", label="Reserve")
+    ax.plot(dates, guarantee, color="green", label="Guarantee", linewidth=2)
+    ax.scatter(dates[tie_idx], guarantee[tie_idx],
+               color="green", edgecolor="black", zorder=5, s=60, label="Tie-in events")
+
+    # --- Format x-axis to show years ---
+    ax.xaxis.set_major_locator(mdates.YearLocator(1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    fig.autofmt_xdate()
+
+    ax.set_xlabel("Year")
+    ax.set_ylabel("Amount")
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
+    print(f"✅ Tie-in path visualization saved to '{save_path}' (start index = {start_index})")
+    return summary
+
+active_returns_full = EU_data["RM_RF"][window:].to_numpy() / 100
+years, T = 10, 120
+cfg = TieInConfig(initial_wealth=100, L_target=1.25, L_trigger=1.3)
+
+# Example: use index 14 (≈ October 2008)
+plot_tie_in_path(
+    active_returns_full=active_returns_full,
+    zcb_data=zcb_data,
+    years=years,
+    T=T,
+    cfg=cfg,
+    start_index=14,
 )

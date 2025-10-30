@@ -72,6 +72,8 @@ def result_plot(EU_data, US_data, window, n_points, eu_factors, us_factors, mark
         # Use markowitz function to get markowitz return and value development of tangent strategy
         markowitz_returns_tan = markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "tangent", n_points = n_points, allow_short=markowitz_short)
         markowitz_value_tan = returns_to_value(markowitz_returns_tan)
+        markowitz_returns_minvar = markowitz_historical(EU_data, US_data, eu_factors, us_factors, window, strategy = "min_variance", n_points = n_points, allow_short=markowitz_short)
+        markowitz_value_minvar = returns_to_value(markowitz_returns_minvar)
         risk_parity_returns = []
         risk_parity_value = []   
         for vol_target in volatility_targets:
@@ -101,6 +103,7 @@ def result_plot(EU_data, US_data, window, n_points, eu_factors, us_factors, mark
     
     if name == "Markowitz vs Risk Parity strategies (with shorting)":
         plt.plot(EU_data['Date'][-len(markowitz_value_tan):], markowitz_value_tan, label='Tangent Strategy')
+        plt.plot(EU_data['Date'][-len(markowitz_value_minvar):], markowitz_value_minvar, label='Min Variance Strategy')
         for i, vol_target in enumerate(volatility_targets):
             plt.plot(EU_data['Date'][-len(risk_parity_value[i]):], risk_parity_value[i], label=f'Risk Parity Strategy (Vol Target: {vol_target}%)')
 
@@ -117,7 +120,7 @@ def result_plot(EU_data, US_data, window, n_points, eu_factors, us_factors, mark
     if name == "Markowitz strategy comparison":
        return markowitz_returns_tan, markowitz_returns_max, markowitz_returns_minvar, market_returns
     if name == "Markowitz vs Risk Parity strategies (with shorting)":
-         return markowitz_returns_tan, risk_parity_returns, market_returns
+         return markowitz_returns_tan, markowitz_returns_minvar, risk_parity_returns, market_returns
 
 
 
@@ -138,7 +141,7 @@ markowitz_short = True
 
 name = "Markowitz vs Risk Parity strategies (with shorting)"
 
-volatility_targets = [1.5, 3, 5]
+volatility_targets = [2, 5]
 
 window = 36
 
@@ -153,7 +156,7 @@ has_MOM2, has_SMB2, has_RM_RF2 = True, True, True
 
 eu_factors, us_factors = ["MOM", "SMB", "RM_RF"], ["RM_RF", "MOM", "SMB"]
 
-markowitz_returns_tan, risk_parity_returns, market_returns = result_plot(name = name, volatility_targets= volatility_targets, EU_data = EU_data, US_data = US_data, eu_factors = eu_factors, us_factors = us_factors, n_points = n_points, window = window, markowitz_short= markowitz_short, data = "both", baseline_market= "EU", has_SMB1=has_SMB1, has_SMB2=has_SMB2, has_MOM1=has_MOM1, has_MOM2=has_MOM2, has_RM_RF1=has_RM_RF1, has_RM_RF2=has_RM_RF2)
+markowitz_returns_tan, markowitz_returns_minvar, risk_parity_returns, market_returns = result_plot(name = name, volatility_targets= volatility_targets, EU_data = EU_data, US_data = US_data, eu_factors = eu_factors, us_factors = us_factors, n_points = n_points, window = window, markowitz_short= markowitz_short, data = "both", baseline_market= "EU", has_SMB1=has_SMB1, has_SMB2=has_SMB2, has_MOM1=has_MOM1, has_MOM2=has_MOM2, has_RM_RF1=has_RM_RF1, has_RM_RF2=has_RM_RF2)
 
 #markowitz_returns_tan, markowitz_returns_max, markowitz_returns_minvar, market_returns = result_plot(name = name, volatility_targets= volatility_targets, EU_data = EU_data, US_data = US_data, eu_factors = eu_factors, us_factors = us_factors, n_points = n_points, window = window, markowitz_short= markowitz_short, data = "both", baseline_market= "EU", has_SMB1=has_SMB1, has_SMB2=has_SMB2, has_MOM1=has_MOM1, has_MOM2=has_MOM2, has_RM_RF1=has_RM_RF1, has_RM_RF2=has_RM_RF2) 
 
@@ -179,6 +182,7 @@ if name == "Markowitz strategy comparison":
 if name == "Markowitz vs Risk Parity strategies (with shorting)":
     strategies = {
         "Tangent": markowitz_returns_tan,
+        "Min Variance": markowitz_returns_minvar,
     }
     for i, vol_target in enumerate(volatility_targets):
         strategies[f'Risk Parity (Vol Target: {vol_target}%)'] = risk_parity_returns[i]

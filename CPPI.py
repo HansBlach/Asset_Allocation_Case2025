@@ -249,7 +249,7 @@ def path_simulator(active_returns_full, zcb_data, years, T, cppip=CPPIParams(), 
 
     # forskellige perioder i linjerne under (første og sidste):
     # for i in range(0, 120):
-    for i in range(len(active_returns_full)-120):
+    for i in range(len(active_returns_full)-156):
         
         zcb_prices = zcb_price_generator(years, T + 1, start = i, data = zcb_data)
         active_returns = active_returns_full[i:T+i]
@@ -510,3 +510,160 @@ print(table)
 # plt.axvline(r_med,  linestyle=":",  linewidth=1, label=f"Median={r_med:.2%}")
 # plt.legend()
 # plt.show()
+import matplotlib.dates as mdates
+
+def plot_cppi_path(
+    active_returns_full: np.ndarray,
+    zcb_data: pd.DataFrame,
+    years: int,
+    T: int,
+    cppip: CPPIParams,
+    start_index: int,
+    save_path: str = "cppi_path_visualization.png",
+):
+    """
+    Plots Wealth, Floor, Guarantee, Active (MV_A), and Reserve (MV_R)
+    over time for a single CPPI path.
+    X-axis shows calendar years (e.g., 2007, 2008, ...).
+    """
+    # Generate the corresponding ZCB prices and active returns for this window
+    zcb_prices = zcb_price_generator(years, T + 1, start=start_index, data=zcb_data)
+    active_returns = active_returns_full[start_index:start_index + T]
+
+    # Run CPPI simulation
+    summary = CPPI(active_returns, zcb_prices, cppip)
+
+    # --- Create date index ---
+    start_date = pd.Timestamp("2007-08-01") + pd.DateOffset(months=start_index)
+    dates = pd.date_range(start=start_date, periods=len(summary), freq="M")
+
+    # Extract series
+    wealth = summary["W"].to_numpy()
+    floor = summary["Floor"].to_numpy()
+    guarantee = summary["Guarantee"].to_numpy()
+    mv_a = summary["MV_A"].to_numpy()
+    mv_r = summary["MV_R"].to_numpy()
+    tie_idx = summary.index[summary["tie_in"]]
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(8,6))
+    ax.plot(dates, wealth, color="red", label="Wealth (W)", linewidth=2)
+    ax.plot(dates, mv_a, color="orange", label="Active Portfolio (MV_A)", linestyle="--", linewidth=1.8)
+    ax.plot(dates, mv_r, color="deepskyblue", label="Reserve Portfolio (MV_R)", linestyle="--", linewidth=1.8)
+    ax.plot(dates, floor, color="blue", label="Floor (F)")
+    ax.plot(dates, guarantee, color="green", label="Guarantee", linewidth=2)
+    ax.scatter(dates[tie_idx], guarantee[tie_idx],
+               color="green", edgecolor="black", zorder=5, s=60, label="Tie-in events")
+
+    # --- Format x-axis to show only years ---
+    ax.xaxis.set_major_locator(mdates.YearLocator(1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    fig.autofmt_xdate()
+
+    ax.set_xlabel("Year")
+    ax.set_ylabel("Amount")
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
+    print(f"✅ CPPI path visualization saved to '{save_path}' (start index = {start_index})")
+    return summary
+
+best_i = 88  # December 2014
+cppip = CPPIParams(m=2, L_target=1.5, L_trigger=1.65)
+
+plot_cppi_path(
+    active_returns_full=active_returns_full,
+    zcb_data=zcb_data,
+    years=10,
+    T=120,
+    cppip=cppip,
+    start_index=best_i,
+)
+
+def compare_cppi_paths(
+    active_returns_full: np.ndarray,
+    zcb_data: pd.DataFrame,
+    years: int,
+    T: int,
+    cppip: CPPIParams,
+    start_index_1: int,
+    start_index_2: int,
+    save_path: str = "cppi_comparison.png",
+):
+    """
+    Plots two CPPI paths (with different start indices) side-by-side
+    using the same y-axis scale for direct comparison.
+    """
+    # --- Run first path ---
+    zcb_prices_1 = zcb_price_generator(years, T + 1, start=start_index_1, data=zcb_data)
+    active_returns_1 = active_returns_full[start_index_1:start_index_1 + T]
+    summary_1 = CPPI(active_returns_1, zcb_prices_1, cppip)
+
+    # --- Run second path ---
+    zcb_prices_2 = zcb_price_generator(years, T + 1, start=start_index_2, data=zcb_data)
+    active_returns_2 = active_returns_full[start_index_2:start_index_2 + T]
+    summary_2 = CPPI(active_returns_2, zcb_prices_2, cppip)
+
+    # --- Create date axes ---
+    base_date = pd.Timestamp("2007-08-01")
+    dates_1 = pd.date_range(base_date + pd.DateOffset(months=start_index_1), periods=len(summary_1), freq="M")
+    dates_2 = pd.date_range(base_date + pd.DateOffset(months=start_index_2), periods=len(summary_2), freq="M")
+
+    # --- Extract data ---
+    W1, F1, G1 = summary_1["W"].to_numpy(), summary_1["Floor"].to_numpy(), summary_1["Guarantee"].to_numpy()
+    W2, F2, G2 = summary_2["W"].to_numpy(), summary_2["Floor"].to_numpy(), summary_2["Guarantee"].to_numpy()
+
+    # --- Determine common y-limits ---
+    ymin = min(W1.min(), W2.min(), F1.min(), F2.min(), G1.min(), G2.min())
+    ymax = max(W1.max(), W2.max(), F1.max(), F2.max(), G1.max(), G2.max())
+
+    # --- Plot side-by-side with same y-limits ---
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+
+    # Left panel (Path 1)
+    ax = axes[0]
+    ax.plot(dates_1, W1, color="red", label="Wealth")
+    ax.plot(dates_1, F1, color="blue", label="Floor")
+    ax.plot(dates_1, G1, color="green", label="Guarantee", linewidth=2)
+    ax.set_title(f"CPPI Path — With start before QE")
+    ax.set_xlabel("Year")
+    ax.set_ylabel("Amount")
+    ax.set_ylim(ymin, ymax)
+    ax.xaxis.set_major_locator(mdates.YearLocator(1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.legend()
+
+    # Right panel (Path 2)
+    ax = axes[1]
+    ax.plot(dates_2, W2, color="red", label="Wealth")
+    ax.plot(dates_2, F2, color="blue", label="Floor")
+    ax.plot(dates_2, G2, color="green", label="Guarantee", linewidth=2)
+    ax.set_title(f"CPPI Path — With start during QE")
+    ax.set_xlabel("Year")
+    ax.set_ylim(ymin, ymax)
+    ax.xaxis.set_major_locator(mdates.YearLocator(1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.legend()
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
+    print(f"✅ CPPI comparison saved to '{save_path}'\n"
+          f"   (start indices {start_index_1} and {start_index_2}, common y-axis scale)")
+    
+cppip = CPPIParams(m=2, L_target=1.25, L_trigger=1.3)
+compare_cppi_paths(
+    active_returns_full=active_returns_full,
+    zcb_data=zcb_data,
+    years=10,
+    T=120,
+    cppip=cppip,
+    start_index_1=14,   # e.g., Oct 2008
+    start_index_2=88,   # e.g., Dec 2014
+)

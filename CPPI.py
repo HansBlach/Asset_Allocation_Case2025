@@ -310,7 +310,7 @@ plt.xlabel('Month')
 plt.ylabel('Amount')
 plt.title('CPPI Wealth and Guarantee over Time')
 plt.legend()
-#plt.show()
+plt.show()
 
 
 # ---- Loop for different m with initial L_target and L_trigger ----
@@ -329,15 +329,17 @@ for m_val in m_values:
                     "m": m_val,
                     # "L_target": L_t,
                     # "L_trigger": L_tr,
-                    "Avg Guarantee": np.mean(guarantee),
-                    "Minimum guarantee": np.min(guarantee),
-                    "Minimum Wealth": np.min(W_120),
-                    "Avg Return": np.mean(Return_120),
+                    "Avg(G)": np.mean(guarantee),
+                    "Min(G)": np.min(guarantee),
+                    "Std(G)": np.std(guarantee),
+                    "Avg(W)": np.mean(W_120),
+                    "Std(W)": np.std(W_120),
+                    "Avg(Tie-ins)": np.mean(num_tie_in),
                     # "Min Return": np.min(Return_120)
                 })
 
 table = pd.DataFrame(rows, columns=[
-    'm', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
+    'm', 'Avg(G)', 'Min(G)', 'Std(G)', 'Avg(W)', 'Std(W)', 'Avg(Tie-ins)'
 ])
 print(table)
 
@@ -360,15 +362,17 @@ for m_val in m_values:
                     "m": m_val,
                     "L_target": L_t,
                     "L_trigger": L_tr,
-                    "Avg Guarantee": np.mean(guarantee),
-                    "Minimum guarantee": np.min(guarantee),
-                    "Minimum Wealth": np.min(W_120),
-                    "Avg Return": np.mean(Return_120),
-                    # "Min Return": np.min(Return_120)
+                    "Avg(G)": np.mean(guarantee),
+                    "Min(G)": np.min(guarantee),
+                    "Std(G)": np.std(guarantee),
+                    "Avg(W)": np.mean(W_120),
+                    "Std(W)": np.std(W_120),
+                    "Avg(Tie-ins)": np.mean(num_tie_in),
+                    #"Min Return": np.min(Return_120)
                 })
 
 table = pd.DataFrame(rows, columns=[
-    'm', 'L_target', 'L_trigger', 'Avg Guarantee', 'Minimum guarantee', 'Minimum Wealth', 'Avg Return'
+    'm', 'L_target', 'L_trigger', 'Avg(G)', 'Min(G)', 'Std(G)', 'Avg(W)', 'Std(W)', 'Avg(Tie-ins)'
 ])
 print(table)
 

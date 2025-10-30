@@ -39,7 +39,11 @@ def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min", allo
     
     w0 = np.zeros(len(mean_return)) + 1/len(mean_return)
 
-    bound = [(0, 1)] * len(mean_return) # Ensures no shorting is allowed
+    if not allow_short:
+        bound = [(0, 1)] * len(mean_return) # Ensures no shorting is allowed
+    
+    if allow_short:
+        bound = [(-1, 1)] * len(mean_return) # Allows shorting up to -200%
 
     if direction == "min":
         cons = [{'type': 'eq', 'fun': weights_sum_constr},
@@ -60,7 +64,7 @@ def markowitz_optimizer(mean_return, cov_matrix, target, direction = "min", allo
 
 # function that finds the empirical minimum variance frontier:
 
-def efficient_frontier(eu_data, us_data, eu_factors, us_factors, n_points=150, allow_short = False):
+def efficient_frontier(eu_data, us_data, eu_factors, us_factors, target_ret = None, n_points=150, allow_short = False):
     eu = eu_data[eu_factors]
     # prefix EU_ to each column name to avoid duplicates
     eu.columns = ["EU_" + col for col in eu.columns]
@@ -77,16 +81,23 @@ def efficient_frontier(eu_data, us_data, eu_factors, us_factors, n_points=150, a
 
     target_returns = np.linspace(mu_min, mu_max, n_points)
 
+    if allow_short:
+        target_returns = np.linspace(0.5, 2, n_points)
+
     frontier_returns = []
     frontier_variance = []
     frontier_weights = []
+    market_cols = [i for i, nm in enumerate(data.columns) if nm.endswith("RM_RF")]
 
     if allow_short:
         for mu in target_returns:
             res = markowitz_optimizer(mean_return, cov_matrix, mu, allow_short= True, direction="min")
             if res.success:
                 w = res.x
-                port_return = w @ mean_return
+                risk_free_weight = 0
+                if sum(w[market_cols]) < 1:
+                    risk_free_weight = 1 - sum(w[market_cols])
+                port_return = w @ mean_return + risk_free_weight * eu_data.iloc[-1]['RF']
                 port_var = w.T @ cov_matrix @ w
                 frontier_returns.append(port_return)
                 frontier_variance.append(np.sqrt(port_var))
@@ -111,9 +122,24 @@ def efficient_frontier(eu_data, us_data, eu_factors, us_factors, n_points=150, a
 # Function that plots the frontier:
 
 
+def frontier_plotter_compare(risks, returns, risks_short, returns_short, name = ""):
+    plt.figure(figsize=(10, 6))
+    plt.plot(risks, returns, 'b-', lw=2, label='Mean-Variance Frontier (No Shorting)')
+    plt.plot(risks_short, returns_short, 'r-', lw=2, label='Mean-Variance Frontier (Shorting Allowed)')
+    plt.xlabel('Portfolio Risk (Standard Deviation)')
+    plt.ylabel('Expected Excess Return')
+    plt.title('Mean–Variance Frontier')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
+    plt.gca().xaxis.set_major_formatter(lambda v,pos: f"{v:.1f}%")
+    plt.gca().yaxis.set_major_formatter(lambda v,pos: f"{v:.1f}%")
+    # saves plot in high resolution
+    plt.savefig(f"{name}.png", dpi=300)
+    #plt.show()
+
 def frontier_plotter(risks, returns):
     plt.figure(figsize=(10, 6))
-    plt.plot(risks, returns, 'b-', lw=2)
+    plt.plot(risks, returns, 'b-', lw=2, label='Mean-Variance Frontier')
     plt.xlabel('Portfolio Risk (Standard Deviation)')
     plt.ylabel('Expected Excess Return')
     plt.title('Mean–Variance Frontier')
@@ -126,13 +152,23 @@ def frontier_plotter(risks, returns):
     #plt.show()
 
 
-us_factors, eu_factors = ["RM_RF", "MOM", "SMB"], ["RM_RF", "MOM"]
+us_factors, eu_factors = ["RM_RF", "MOM", "SMB"], ["MOM", "SMB"]
+
+EU_data_long = pd.read_csv("csv_files/long_EXPORT EU EUR.csv")
+US_data_long = pd.read_csv("csv_files/long_EXPORT US EUR.csv")
+
+variance, returns, weights = efficient_frontier(EU_data_long, US_data_long, eu_factors, us_factors, n_points=150, allow_short = False)
+
+us_factors, eu_factors = ["SMB", "MOM", "RM_RF"], ["RM_RF", "MOM", "SMB"]
+
+returns_short = np.linspace(0.4, 2.5, 50)
+
+variance_short, returns_short, weights_short = efficient_frontier(EU_data, US_data, eu_factors, us_factors, n_points=50, allow_short = True, target_ret = returns_short)
 
 
+frontier_plotter_compare(variance, returns, variance_short, returns_short, name = "efficient_frontier_compare")
 
-# variance, returns, weights = efficient_frontier(EU_data, US_data, eu_factors, us_factors, n_points=50, allow_short = True)
-
-# frontier_plotter(variance, returns)
+frontier_plotter(variance, returns)
 
 # We want to invest in the portfolio with the highest sharpe ratio, that is the tangent portfolio
 # but we can't use theoretical results because we have a no-shorting constraint
